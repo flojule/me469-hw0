@@ -17,7 +17,7 @@ def main():
     state_list.append(state_0)
     state_list = compute_states(state_list, _Control)
 
-    # fig, ax = plt.subplots()
+    # fig, ax = plt.subplots(figsize=(10,10))
     # ax.set_title("Q2: Robot motion model based on the 6 given control inputs")
     # plot_state(fig, ax, state_list, "Motion model")
 
@@ -31,7 +31,7 @@ def main():
     state_list.append(state_0)
     state_list = compute_states(state_list, ds0_Control)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(10,10))
     ax.set_title("Q3: Robot trajectories based on ds0_Control.dat")
     plot_state(fig, ax, state_list, "Motion model")
     plot_state(fig, ax, ground_truth, "Ground truth")
@@ -72,6 +72,8 @@ def plot_state(fig, ax, data, label):
 
     ax.plot(x, y, label=label)
     # ax.quiver(x, y, np.cos(theta), np.sin(theta), color='r', scale=20)
+    ax.quiver(x[0], y[0], math.cos(theta[0]), math.sin(theta[0]), width=0.005, scale=10,label=f'Start orientation {label}')
+    ax.quiver(x[-1], y[-1], math.cos(theta[-1]), math.sin(theta[-1]), width=0.005, scale=10, label=f'End orientation {label}')
     ax.set_xlabel('X position (m)')
     ax.set_ylabel('Y position (m)')
     ax.legend()
