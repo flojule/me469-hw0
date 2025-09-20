@@ -15,7 +15,7 @@ def main():
     _Control = np.column_stack((_time, _Control)) # add time stamps to control
     _Control = [Control(row[0], row[1], row[2], row[3]) for row in _Control]
     
-    state_list = compute_states(State(0, 0, 0, 0), _Control) # start at (t, x, y, theta) = (0, 0, 0, 0)
+    state_list = motion_model(State(0, 0, 0, 0), _Control) # start at (t, x, y, theta) = (0, 0, 0, 0)
 
     # fig, ax = plt.subplots(figsize=(10,10))
     # ax.set_title("Q2: Robot motion model based on the 6 given control inputs")
@@ -23,11 +23,11 @@ def main():
 
     # Q3:
     i = 0 # dataset index
+    sample_time = 0.02 # 50 Hz
     ds_Control, ds_GroundTruth, ds_Landmark_GroundTruth, ds_Measurement = import_data(i)
- 
-    state_0 = ds_GroundTruth[0] # x, y, theta starting point from ground truth (1.29812900, 1.88315210, 2.82870000)
+    ds_Control, ds_GroundTruth, ds_Measurement = resample_data(sample_time, ds_Control, ds_GroundTruth, ds_Measurement)
     
-    ds_State = compute_states(ds_GroundTruth[0], ds_Control) # 
+    ds_State = motion_model(ds_GroundTruth[0], ds_Control) # starting at first ground truth state
 
     fig, ax = plt.subplots(figsize=(10,10))
     ax.set_title(f"Q3: Robot trajectories based on ds{i}_Control.dat")
@@ -36,6 +36,13 @@ def main():
     plot_landmarks(fig, ax, ds_Landmark_GroundTruth)
 
     # Q6:
+
+    test_State = [State(0, 2.0, 3.0, 0.0), State(0, 0.0, 3.0, 0.0), State(0, 1.0, -2.0, 0.0)]
+    test_LM_id = [6, 13, 17]
+    test_Landmark = [[landmark for landmark in ds_Landmark_GroundTruth if landmark.id == test_LM_id[0]],
+                     [landmark for landmark in ds_Landmark_GroundTruth if landmark.id == test_LM_id[1]],
+                     [landmark for landmark in ds_Landmark_GroundTruth if landmark.id == test_LM_id[2]]]
+
 
 
     plt.show()
@@ -73,52 +80,64 @@ def import_dat(filename):
     with open(filename, 'r') as file:
         return np.loadtxt(file)
     
-def resample_data(data, dt):
-    pass
+def resample_data(dt, ds_Control, ds_GroundTruth, ds_Measurement):
+    # measurements rounded to nearest timestep
+    # Control and GroundTruth linearly interpolated to fixed timestep
+
+    max_time = min(ds_Control[-1].t, ds_GroundTruth[-1].t) # find the maximum time that is available in all datasets
+    min_time = min(ds_Control[0].t, ds_GroundTruth[0].t) # find the minimum time that is available in all datasets
+    timesteps = int((max_time - min_time) / dt) + 1
+
+    return ds_Control, ds_GroundTruth, ds_Measurement
+    
 
 def get_robot_id(ds_Measurement, ds_Barcodes): # find robot id
     ids = set()
-    for measurement in ds_Measurement:
-        ids.add(measurement.id)
+    ids.update(measurement.id for measurement in ds_Measurement)
 
-    robot_id_pos = set()
+    robot_id_possible = set()
     for i in ds_Barcodes[:, 0]:
         if i not in ids:
-            robot_id_pos.add(i)
+            robot_id_possible.add(i)
 
-    if len(robot_id_pos) != 1:
-        print(f"More than one possible robot: {robot_id_pos}")
+    if len(robot_id_possible) != 1:
+        print(f"More than one possible robot: {robot_id_possible}")
         return None
     else:
-        robot_id = int(robot_id_pos.pop())
+        robot_id = int(robot_id_possible.pop())
         print(f"Robot id is {robot_id}")
         return robot_id
 
 ### MOTION MODEL FUNCTIONS ###
 
-def motion_model(state, control): # takes in a state and control object, returns new state object
-    if control.omega == 0:
-        new_x = state.x + control.v * math.cos(state.theta) * control.dt
-        new_y = state.y + control.v * math.sin(state.theta) * control.dt
-        new_theta = state.theta
-    else:
-        new_x = state.x + (control.v / control.omega) * (math.sin(state.theta + control.omega * control.dt) - math.sin(state.theta))
-        new_y = state.y + (control.v / control.omega) * (math.cos(state.theta) - math.cos(state.theta + control.omega * control.dt))
-        new_theta = state.theta + control.omega * control.dt
-    return State(control.dt, new_x, new_y, new_theta)
-
-def compute_states(state_0, ds_Control): # takes the initial state and a list of control objects, returns a list of state objects
+def motion_model(state_0, ds_Control): # takes in the initial state and a list of control objects, returns a list of state objects
     ds_State = []
     ds_State.append(state_0)
     for _control in ds_Control:
-        new_state = motion_model(ds_State[-1], _control)
-        ds_State.append(new_state)
+        if _control.omega == 0:
+            new_x = ds_State[-1].x + _control.v * math.cos(ds_State[-1].theta) * _control.dt
+            new_y = ds_State[-1].y + _control.v * math.sin(ds_State[-1].theta) * _control.dt
+            new_theta = ds_State[-1].theta
+        else:
+            new_x = ds_State[-1].x + (_control.v / _control.omega) * (math.sin(ds_State[-1].theta + _control.omega * _control.dt) - math.sin(ds_State[-1].theta))
+            new_y = ds_State[-1].y + (_control.v / _control.omega) * (math.cos(ds_State[-1].theta) - math.cos(ds_State[-1].theta + _control.omega * _control.dt))
+            new_theta = ds_State[-1].theta + _control.omega * _control.dt
+
+        ds_State.append(State(_control.dt, new_x, new_y, new_theta))
     return ds_State
 
 ### MEASUREMENT MODEL FUNCTIONS ###
 
-def measurement_model(state, landmark):
-    pass
+def measurement_model(ds_State, ds_Measurement):
+    for state in ds_State:
+        for measurement in ds_Measurement:
+            if abs(measurement.t - state.t) < 1e-5: # only consider measurements at the same time as the state
+                x = measurement.d * math.cos(state.theta + measurement.alpha) + state.x
+                y = measurement.d * math.sin(state.theta + measurement.alpha) + state.y
+                state.add_landmark(Landmark(measurement.id, x, y))
+
+
+
 
 ### PLOTTING FUNCTIONS ###
     
@@ -145,7 +164,7 @@ def plot_landmarks(fig, ax, ds_Landmarks):
     y = [landmark.y for landmark in ds_Landmarks]
     ax.scatter(x, y, marker='o', color='black', label='Landmarks')
     for landmark in ds_Landmarks:
-        ax.text(landmark.x, landmark.y, f'ID: {landmark.id:.0f}')
+        ax.text(landmark.x, landmark.y, f'LM{landmark.id:.0f}')
 
 ### DATA STRUCTURES ###
 
@@ -155,6 +174,10 @@ class State:
         self.x = x
         self.y = y
         self.theta = theta
+        self.LM = [] # list of measured landmarks
+
+    def add_landmark(self, landmark):
+        self.LM.append(landmark)
 
 class Control:
     def __init__(self, t, v, omega, dt):
@@ -170,11 +193,11 @@ class Landmark:
         self.y = y
 
 class Measurement:
-    def __init__(self, t, id, range, bearing):
+    def __init__(self, t, id, d, alpha):
         self.t = t
         self.id = id
-        self.range = range
-        self.bearing = bearing
+        self.d = d
+        self.alpha = alpha
 
 
 if __name__ == "__main__":
