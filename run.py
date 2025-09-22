@@ -152,18 +152,80 @@ def motion_model_t(state, control): # uses current state and a control object, r
 def measurement_model(ds_State, ds_Landmark_GroundTruth): # uses landmark ground truth and measurements as input, returns estimated state as output
     
     for state in ds_State:
-        measurement_model_t(state, ds_Landmark_GroundTruth, measurement_noise=None)
+        state_ = np.array([state.x, state.y, state.theta])
+        measurement_model_t(state_, ds_Landmark_GroundTruth)
 
-def measurement_model_t(state, ds_Landmark_GroundTruth, measurement_noise=None): # uses current state and landmark ground truth as input, adds noise to the LM, returns state with estimated landmarks as output
+def measurement_model_t(state, ds_Landmark_GroundTruth): # uses current state and landmark ground truth as input, returns state with estimated landmarks as output
     for landmark in ds_Landmark_GroundTruth:
-        noise_x = np.random.normal(0, landmark.x_stddev)
-        noise_y = np.random.normal(0, landmark.y_stddev)
-        landmark_noise = Landmark(landmark.id, landmark.x + noise_x, landmark.y + noise_y) # add noise to landmark position
-        d_est = math.sqrt((landmark_noise.x - state.x)**2 + (landmark_noise.y - state.y)**2)
-        alpha_est = math.atan2(landmark_noise.y - state.y, landmark_noise.x - state.x) - state.theta
+        d_est = math.sqrt((landmark.x - state[0])**2 + (landmark.y - state[1])**2)
+        alpha_est = math.atan2(landmark.y - state[1], landmark.x - state[0]) - state[2]
         state.add_landmark(Measurement(state.t, landmark.id, d_est, alpha_est))
 
+### UKF ### converting objects to numpy arrays for numerical operations
 
+def ukf(state, control, measurement, ds_Landmark_GroundTruth):
+    # Prediction step
+    alpha, beta, kappa = 0.001, 2, 0
+    state_ = np.array([state.x, state.y, state.theta]) # convert state to numpy array
+    Pxx = state.Pxx
+    X = generate_sigma_points(state_, Pxx, alpha, beta, kappa) # X are the sigma points
+    Y = [motion_model_t(sp, control) for sp in X] # Y are the propagated sigma points
+    Y = np.array([[sp.x, sp.y, sp.theta] for sp in Y]) # convert to numpy array
+    Q = np.diag([0.1, 0.1, 0.1]) # process noise covariance
+    y_mean, Pyy = compute_mean_and_covariance(Y, Q, alpha, beta, kappa)
+
+    # Correction step
+    Z = [measurement_model_t(sp, ds_Landmark_GroundTruth) for sp in Y] # Z are the measurement sigma points
+    R = np.diag([0.1, 0.1]) # measurement noise covariance
+    z_mean, Pzz = compute_mean_and_covariance(Z, R, alpha, beta, kappa)
+
+    Pyz = compute_cross_covariance(Y, y_mean, Z, z_mean, alpha, beta, kappa) # cross covariance
+    K = Pyz @ np.linalg.inv(Pzz) # Kalman gain
+
+    measurement_ = np.array([measurement.d, measurement.alpha])
+    innovation = measurement_ - z_mean # measurement innovation
+
+    state_mean = y_mean + K @ innovation
+    state_Pxx = Pyy - K @ Pzz @ K.T
+
+    state.x, state.y, state.theta = state_mean
+    state.Pxx = state_Pxx
+
+def generate_sigma_points(state, Pxx, alpha, beta, kappa): # need to convert state to numpy array
+    n = state.shape[0]
+    lambda_ = alpha**2 * (n + kappa) - n
+    sigma_points = np.zeros((2 * n + 1, 3))
+    sigma_points[0] = state
+    sqrt_matrix = np.linalg.cholesky((n + lambda_) * Pxx)
+    for i in range(n):
+        sigma_points[i + 1] = state + sqrt_matrix[:, i]
+        sigma_points[i + 1 + n] = state - sqrt_matrix[:, i]
+    return sigma_points
+
+def compute_mean_and_covariance(Y, Q, alpha, beta, kappa): # (Y, Q) or (Z, R)
+    n = Y.shape[1]
+    weights_mean = np.zeros(2 * n + 1)
+    weights_cov = np.zeros(2 * n + 1)
+    lambda_ = alpha**2 * (n + kappa) - n
+    weights_mean[0] = lambda_ / (n + lambda_)
+    weights_cov[0] = lambda_ / (n + lambda_) + (1 - alpha**2 + beta)
+    for i in range(1, 2 * n + 1):
+        weights_mean[i] = 1 / (2 * (n + lambda_))
+        weights_cov[i] = 1 / (2 * (n + lambda_))
+    mean = np.sum(weights_mean[:, None] * Y, axis=0)
+    cov = np.sum(weights_cov[:, None, None] * (Y - mean)[:, :, None] @ (Y - mean)[:, None, :], axis=0) + Q
+    return mean, cov
+
+def compute_cross_covariance(Y, y_mean, Z, z_mean, alpha, beta, kappa):
+    n = Y.shape[1]
+    m = Z.shape[1]
+    weights_cov = np.zeros(2 * n + 1)
+    lambda_ = alpha**2 * (n + kappa) - n
+    weights_cov[0] = lambda_ / (n + lambda_) + (1 - alpha**2 + beta)
+    for i in range(1, 2 * n + 1):
+        weights_cov[i] = 1 / (2 * (n + lambda_))
+    cross_cov = np.sum(weights_cov[:, None, None] * (Y - y_mean)[:, :, None] @ (Z - z_mean)[:, None, :], axis=0)
+    return cross_cov
 
 ### PLOTTING ###
 
@@ -222,8 +284,11 @@ class State:
         self.x = x
         self.y = y
         self.theta = theta
+        self.n = 3 # state dimension
         self.LM_measured = [] # list of measured landmarks as measurement objects
         self.LM_est = [] # list of estimated landmarks as landmark objects (for plotting)
+        self.mean = np.array([x, y, theta]) # state mean
+        self.Pxx = np.diag([0.1, 0.1, 0.1]) # initial covariance matrix
 
     def add_landmark(self, landmark):
         self.LM_measured.append(landmark)
@@ -250,6 +315,8 @@ class Measurement:
         self.id = int(id)
         self.d = d
         self.alpha = alpha
+
+def sigma_points(points, Pxx, )
 
 
 if __name__ == "__main__":
