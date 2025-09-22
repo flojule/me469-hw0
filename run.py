@@ -17,9 +17,9 @@ def main():
     
     state_list = motion_model(State(), _Control) # start at (t, x, y, theta) = (0, 0, 0, 0)
 
-    fig, ax = plt.subplots(figsize=(10,5))
-    ax.set_title("Q2: Robot motion model based on the 6 given control inputs")
-    plot_state(fig, ax, state_list, "Motion model")
+    # fig, ax = plt.subplots(figsize=(10,5))
+    # ax.set_title("Q2: Robot motion model based on the 6 given control inputs")
+    # plot_state(fig, ax, state_list, "Motion model")
 
     # Q3:
     i = 0 # dataset index
@@ -54,12 +54,14 @@ def main():
         for landmark in state.LM_measured:
             if landmark.id == test_LM_id[j]:
                 print(f"Landmark {landmark.id} predicted at: (range, heading) = ({landmark.d:.2f} m, {landmark.alpha:.2f} rad)")
+                # error = math.sqrt((landmark.x - test_Landmark[0].x)**2 + (landmark.y - test_Landmark[0].y)**2)
+                # print
+                break
 
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20,10))
-    fig.suptitle("Q6: Measurement model predictions for 3 different robot positions")
-    plot_measurement_predictions(fig, (ax1, ax2, ax3), test_State, ds_Landmark_GroundTruth)
+    # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20,10))
+    # fig.suptitle("Q6: Measurement model predictions for 3 different robot positions")
+    # plot_measurement_predictions(fig, (ax1, ax2, ax3), test_State, ds_Landmark_GroundTruth)
 
-    # plt.tight_layout()
     plt.show()
 
 ### DATA IMPORT ###
@@ -129,19 +131,27 @@ def motion_model(state_0, ds_Control): # uses initial state and a list of contro
     motion_model_State = []
     motion_model_State.append(state_0)
     for control in ds_Control:
-        next_state = motion_model_t(motion_model_State[-1], control)
+        next_state = motion_model_t(motion_model_State[-1], control, process_noise=None)
         motion_model_State.append(next_state)
     return motion_model_State
 
-def motion_model_t(state, control): # uses current state and a control object, returns the next state
+def motion_model_t(state, control, process_noise=None): # uses current state and a control object, returns the next state
+    x_stddev = 0.0
+    y_stddev = 0.0
+    theta_stddev = 0.0
+
+    process_noise_x = np.random.normal(0, x_stddev**2)
+    process_noise_y = np.random.normal(0, y_stddev**2)
+    process_noise_theta = np.random.normal(0, theta_stddev**2)
+
     if control.omega == 0:
-        new_x = state.x + control.v * math.cos(state.theta) * control.dt
-        new_y = state.y + control.v * math.sin(state.theta) * control.dt
-        new_theta = state.theta
+        new_x = state.x + control.v * math.cos(state.theta) * control.dt + process_noise_x
+        new_y = state.y + control.v * math.sin(state.theta) * control.dt + process_noise_y
+        new_theta = state.theta + process_noise_theta
     else:
-        new_x = state.x + (control.v / control.omega) * (math.sin(state.theta + control.omega * control.dt) - math.sin(state.theta))
-        new_y = state.y + (control.v / control.omega) * (math.cos(state.theta) - math.cos(state.theta + control.omega * control.dt))
-        new_theta = state.theta + control.omega * control.dt
+        new_x = state.x + (control.v / control.omega) * (math.sin(state.theta + control.omega * control.dt) - math.sin(state.theta)) + process_noise_x
+        new_y = state.y + (control.v / control.omega) * (math.cos(state.theta) - math.cos(state.theta + control.omega * control.dt)) + process_noise_y
+        new_theta = state.theta + control.omega * control.dt + process_noise_theta
 
     return State(control.dt, new_x, new_y, new_theta)
 
@@ -150,9 +160,9 @@ def motion_model_t(state, control): # uses current state and a control object, r
 def measurement_model(ds_State, ds_Landmark_GroundTruth): # uses landmark ground truth and measurements as input, returns estimated state as output
     
     for state in ds_State:
-        measurement_model_t(state, ds_Landmark_GroundTruth)
-        
-def measurement_model_t(state, ds_Landmark_GroundTruth): # uses current state and landmark ground truth as input, adds noise to the LM, returns state with estimated landmarks as output
+        measurement_model_t(state, ds_Landmark_GroundTruth, measurement_noise=None)
+
+def measurement_model_t(state, ds_Landmark_GroundTruth, measurement_noise=None): # uses current state and landmark ground truth as input, adds noise to the LM, returns state with estimated landmarks as output
     for landmark in ds_Landmark_GroundTruth:
         noise_x = np.random.normal(0, landmark.x_stddev)
         noise_y = np.random.normal(0, landmark.y_stddev)
