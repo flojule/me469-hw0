@@ -131,27 +131,19 @@ def motion_model(state_0, ds_Control): # uses initial state and a list of contro
     motion_model_State = []
     motion_model_State.append(state_0)
     for control in ds_Control:
-        next_state = motion_model_t(motion_model_State[-1], control, process_noise=None)
+        next_state = motion_model_t(motion_model_State[-1], control)
         motion_model_State.append(next_state)
     return motion_model_State
 
-def motion_model_t(state, control, process_noise=None): # uses current state and a control object, returns the next state
-    x_stddev = 0.0
-    y_stddev = 0.0
-    theta_stddev = 0.0
-
-    process_noise_x = np.random.normal(0, x_stddev**2)
-    process_noise_y = np.random.normal(0, y_stddev**2)
-    process_noise_theta = np.random.normal(0, theta_stddev**2)
-
+def motion_model_t(state, control): # uses current state and a control object, returns the next state
     if control.omega == 0:
-        new_x = state.x + control.v * math.cos(state.theta) * control.dt + process_noise_x
-        new_y = state.y + control.v * math.sin(state.theta) * control.dt + process_noise_y
-        new_theta = state.theta + process_noise_theta
+        new_x = state.x + control.v * math.cos(state.theta) * control.dt
+        new_y = state.y + control.v * math.sin(state.theta) * control.dt
+        new_theta = state.theta
     else:
-        new_x = state.x + (control.v / control.omega) * (math.sin(state.theta + control.omega * control.dt) - math.sin(state.theta)) + process_noise_x
-        new_y = state.y + (control.v / control.omega) * (math.cos(state.theta) - math.cos(state.theta + control.omega * control.dt)) + process_noise_y
-        new_theta = state.theta + control.omega * control.dt + process_noise_theta
+        new_x = state.x + (control.v / control.omega) * (math.sin(state.theta + control.omega * control.dt) - math.sin(state.theta))
+        new_y = state.y + (control.v / control.omega) * (math.cos(state.theta) - math.cos(state.theta + control.omega * control.dt))
+        new_theta = state.theta + control.omega * control.dt
 
     return State(control.dt, new_x, new_y, new_theta)
 
