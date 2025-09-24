@@ -60,13 +60,6 @@ def main():
             x_gt, y_gt = landmark.x[0], landmark.x[1]
             print(f"Landmark {landmark.id} ground truth at: \n(x, y) = ({x_gt:.3f} m, {y_gt:.3f} m)")
             break
-        # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20,10))
-        # fig.suptitle("Q6: Measurement model predictions for 3 different robot positions")
-        # plot_measurement_predictions(fig, (ax1, ax2, ax3), test_State, ds_Landmark_GroundTruth)
-        # test_Landmark = [landmark for landmark in ds_Landmark_GroundTruth if landmark.id in test_LM_id]
-        # plot_landmarks(fig, ax1, [test_Landmark[0]])
-        # plot_landmarks(fig, ax2, [test_Landmark[1]])
-        # plot_landmarks(fig, ax3, [test_Landmark[2]])
 
     # --- Part B --- 
     if partB:
@@ -84,21 +77,22 @@ def main():
         #UKF parameters
         state_0 = ds_GroundTruth[0] # initial state from ground truth
 
-        kappa_guesses = [5.0, 10.0, 20.0]
+        # kappa_guesses = [5.0, 10.0, 20.0]
+        weight_0_guesses = [0.001, 0.02] # initial weight guesses for (x, y, theta)
         variance_0_guesses = [0.000001] # initial variance guesses for (x, y, theta)
         variance_Q_guesses = [0.000001] # process noise variance guesses for (x, y, theta)
         variance_R_guesses = [0.000001] # measurement noise variance guesses for (range, bearing)
         # kappa_guesses = [kappa_guesses[3]]
         # variance_0_guesses = [variance_0_guesses[0]]
 
-        for kappa in kappa_guesses: # try different kappa values
+        for weight_0 in weight_0_guesses: # try different kappa values
             for variance_0 in variance_0_guesses: # try different initial variances
                 for variance_Q in variance_Q_guesses: # try different process noise variances
                     for variance_R in variance_R_guesses: # try different measurement noise variances
                         variance_Q = variance_0 # process noise variance
                         variance_R = variance_0 # measurement noise variance
 
-                        weights = compute_weights(3, kappa) # n=3 for (x, y, theta)
+                        weights = compute_weights(3, weight_0) # n=3 for (x, y, theta)
                         state_0.P = np.diag([variance_0, variance_0, variance_0]) # initial covariance
                         Q = np.diag([variance_Q, variance_Q, variance_Q]) # process noise covariance
                         R = np.diag([variance_R, variance_R]) # measurement noise covariance
@@ -314,10 +308,9 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
 
 def generate_sigma_points(prior: "State", weight_0): # need to convert state to numpy array
     n = prior.x.shape[0]
-    # lambda_ = alpha**2 * (n + kappa) - n
     sigma_points = np.zeros((2 * n + 1, 3))
     sigma_points[0] = prior.x
-    sqrt_matrix = np.linalg.cholesky((n / (n + weight_0)) * prior.P)
+    sqrt_matrix = np.linalg.cholesky((float(n) / (1.0 - weight_0)) * prior.P)
     for i in range(n):
         sigma_points[i + 1] = prior.x + sqrt_matrix[:, i]
         sigma_points[i + 1 + n] = prior.x - sqrt_matrix[:, i]
@@ -330,11 +323,11 @@ def compute_mean_and_covariance(Y, Q, weights_mean, weights_cov): # (Y, Q) or (Z
     # print(mean.shape, cov.shape)
     return mean, cov
 
-def compute_weights(n, kappa):
+def compute_weights(n, weight_0):
     weights = np.zeros(2 * n + 1)
-    weights[0] = kappa / (n + kappa)
+    weights[0] = weight_0
     for i in range(1, 2 * n + 1):
-        weights[i] = 1 / (2 * (n + kappa))
+        weights[i] = (1 - weight_0) / (2 * n)
     sum_weights = np.sum(weights)
     if abs(sum_weights - 1.0) > 1e-5:
         print(f"Weights do not sum to 1, sum is {sum_weights}")
