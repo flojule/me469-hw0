@@ -5,14 +5,11 @@ import matplotlib.pyplot as plt
 def main():
     i = 0 # dataset index
     partA = True
-    partB = True
+    partB = False
 
-    export = True # export resampled data files
-    use_resampled = True # use resampled data files
+    export = False # export resampled data files
+    use_resampled = False # use resampled data files
     dt = 1/10 # resampling timestep
-
-    global DEBUG
-    DEBUG = False
 
     if use_resampled:
         dt = None
@@ -41,19 +38,11 @@ def main():
         # Q3:
         DR_State = dead_reckoning(ds_GroundTruth[0], ds_Control) # starting at first ground truth state
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20,10))
-        fig.suptitle(f"Robot trajectories, dead reckoning, based on ds{i}_Control.dat")
-        plot_state(fig, ax1, DR_State, "Motion model")
-        plot_state(fig, ax1, ds_GroundTruth, "Ground truth")
-        plot_landmarks(fig, ax1, ds_Landmark_GroundTruth)
-
-        ax2.set_title(f"Zoomed in view")
-        plot_state(fig, ax2, DR_State, "Motion model")
-        plot_state(fig, ax2, ds_GroundTruth, "Ground truth")
-        plot_landmarks(fig, ax2, ds_Landmark_GroundTruth)
-        zoom = 1
-        ax2.set_xlim(ds_GroundTruth[0].x[0]-zoom, ds_GroundTruth[0].x[0]+zoom)
-        ax2.set_ylim(ds_GroundTruth[0].x[1]-zoom, ds_GroundTruth[0].x[1]+zoom)
+        title = f"Robot trajectories, dead reckoning, based on ds{i}_Control.dat and ds{i}_Measurement.dat"
+        ds_ = [[ds_GroundTruth, DR_State], ds_Landmark_GroundTruth]
+        labels = ["Ground truth", "Dead reckoning"]
+        colors = ["blue", "orange"]
+        ds_Plot(ds_, title, labels, colors)
 
         # Q6:
         test_State = [State(x=[2.0, 3.0, 0.0]), State(x=[0.0, 3.0, 0.0]), State(x=[1.0, -2.0, 0.0])]
@@ -62,28 +51,22 @@ def main():
         for j, state in enumerate(test_State):
             landmark = [landmark_ for landmark_ in ds_Landmark_GroundTruth if landmark_.id == test_LM_id[j]][0] # extract single landmark from list
             measurement = measurement_model(state, landmark)
+            x, y = get_xy_measurement(state, measurement)
             print(f"\nRobot position: \n(x, y, theta) = ({state.x[0]:.3f} m, {state.x[1]:.3f} m, {state.x[2]:.3f} rad)")
             print(f"Landmark {measurement.id} predicted at: \n(range, bearing) = ({measurement.z[0]:.3f} m, {measurement.z[1]:.3f} rad)")
-            x, y = get_xy_measurement(state, measurement)
             print(f"(x, y) = ({x:.3f} m, {y:.3f} m)")
-            x_gt, y_gt = landmark.x[0], landmark.x[1]
-            print(f"Landmark {landmark.id} ground truth at: \n(x, y) = ({x_gt:.3f} m, {y_gt:.3f} m)")
+            print(f"Landmark {landmark.id} ground truth at: \n(x, y) = ({landmark.x[0]:.3f} m, {landmark.x[1]:.3f} m)")
             break
 
     # ------------- Part B -------------
     if partB:
         #UKF parameters
         state_0 = ds_GroundTruth[0] # initial state from ground truth
-        # weight_0 = 0.1
-        variance_0 = 0.001
-        variance_Q = 0.001
-        variance_R = 0.001
-        alpha, kappa, beta = 0.001, 0.0, 2.0
-
+        state_0.P = np.diag([0.001, 0.001, 0.0001]) # initial covariance
+        Q = np.diag([0.001, 0.001, 0.0001]) # process noise covariance
+        R = np.diag([0.001, 0.0001]) # measurement noise covariance
+        alpha, kappa, beta = 0.3, 0.0, 2.0
         weights_mean, weights_cov = compute_weights(3, alpha, kappa, beta) # n=3 for (x, y, theta)
-        state_0.P = np.diag([variance_0, variance_0, variance_0]) # initial covariance
-        Q = np.diag([variance_Q, variance_Q, variance_Q]) # process noise covariance
-        R = np.diag([variance_R, variance_R]) # measurement noise covariance
 
         UKF_State = []
         UKF_State.append(state_0)
@@ -97,19 +80,13 @@ def main():
         print(f"(x, y, theta) = ({ds_GroundTruth[-1].x[0]:.3f} m, {ds_GroundTruth[-1].x[1]:.3f} m, {ds_GroundTruth[-1].x[2]:.3f} rad)")
         print(f"(x, y, theta) = ({UKF_State[-1].x[0]:.3f} m, {UKF_State[-1].x[1]:.3f} m, {UKF_State[-1].x[2]:.3f} rad)")
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20,10))
-        fig.suptitle(f"Q7: Robot trajectories, UKF, based on ds{i}_Control.dat and ds{i}_Measurement.dat")
-        plot_state(fig, ax1, UKF_State, "UKF")
-        plot_state(fig, ax1, ds_GroundTruth, "Ground truth")
-        plot_landmarks(fig, ax1, ds_Landmark_GroundTruth)
+        DR_State = dead_reckoning(ds_GroundTruth[0], ds_Control) # as a reference for now
 
-        ax2.set_title(f"Zoomed in view")
-        plot_state(fig, ax2, UKF_State, "Motion model")
-        plot_state(fig, ax2, ds_GroundTruth, "Ground truth")
-        plot_landmarks(fig, ax2, ds_Landmark_GroundTruth)
-        zoom = 1
-        ax2.set_xlim(ds_GroundTruth[0].x[0]-zoom, ds_GroundTruth[0].x[0]+zoom)
-        ax2.set_ylim(ds_GroundTruth[0].x[1]-zoom, ds_GroundTruth[0].x[1]+zoom)
+        title = f"Robot trajectories, UKF, based on ds{i}_Control.dat and ds{i}_Measurement.dat"
+        ds_ = [[ds_GroundTruth, DR_State, UKF_State], ds_Landmark_GroundTruth]
+        labels = ["Ground truth", "Dead reckoning", "UKF"]
+        colors = ["blue", "orange", "green"]
+        ds_Plot(ds_, title, labels, colors)
 
 
     plt.show()
@@ -225,7 +202,7 @@ def motion_model(prior: "State", control: "Control", Q=np.zeros((3, 3))): # uses
         x[0] = prior.x[0] + (control.v / control.omega) * (math.sin(prior.x[2] + control.omega * control.dt) - math.sin(prior.x[2])) #+ np.random.normal(0, math.sqrt(Q[0,0]))
         x[1] = prior.x[1] + (control.v / control.omega) * (math.cos(prior.x[2]) - math.cos(prior.x[2] + control.omega * control.dt)) #+ np.random.normal(0, math.sqrt(Q[1,1]))
         x[2] = prior.x[2] + control.omega * control.dt #+ np.random.normal(0, math.sqrt(Q[2,2]))
-    x[2] = (x[2] + math.pi) % (2 * math.pi) - math.pi # shift to ]-pi, pi]
+    x[-1] = normalize_angle(x[-1])
     posterior = State(control.t, x=x)
     return posterior
 
@@ -238,12 +215,15 @@ def dead_reckoning(state_0: "State", ds_Control: list["Control"]): # loops motio
         DR_State.append(posterior)
     return DR_State
 
+def normalize_angle(angle): # shift to ]-pi, pi]
+    return (angle + math.pi) % (2 * math.pi) - math.pi 
+
 ### MEASUREMENT MODEL ###
 
 def measurement_model(state: "State", landmark: "Landmark", R=np.zeros((2, 2))): # uses current state and landmark ground truth as input, returns estimated landmarks as output
     range = math.sqrt((landmark.x[0] - state.x[0])**2 + (landmark.x[1] - state.x[1])**2) #+ np.random.normal(0, math.sqrt(R[0,0]))
     bearing = math.atan2(landmark.x[1] - state.x[1], landmark.x[0] - state.x[0]) - state.x[2] #+ np.random.normal(0, math.sqrt(R[1,1]))
-    bearing = (bearing + math.pi) % (2 * math.pi) - math.pi # shift to ]-pi, pi]
+    bearing = normalize_angle(bearing)
     measurement = Measurement(state.t, landmark.id, range, bearing)
     return measurement
 
@@ -266,8 +246,9 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
     if len(measurements) == 0: # no measurements, return prediction as posterior
         posterior = State(control.t, x=y_mean, P=Pyy)
     else: # Correction step
-        posterior_list = []
         for measurement in measurements:
+            Y_np = generate_sigma_points(State(x=y_mean, P=Pyy), alpha, kappa, beta) # new sigma points around predicted mean
+            Y = [State(x=sp, P=Pyy) for sp in Y_np]
         # measurement = measurements[0] # use the first measurement only for now
             if measurement.id in [landmark_.id for landmark_ in ds_Landmark_GroundTruth]: # if measurement id not in landmark ground truth, return prediction as posterior
                 landmark = [landmark_ for landmark_ in ds_Landmark_GroundTruth if landmark_.id == measurement.id][0] #  landmark corresponding to measurement
@@ -278,20 +259,16 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
                 Pyz = compute_cross_covariance(Y_np, y_mean, Z_np, z_mean, weights_cov) # cross covariance
                 K = Pyz @ np.linalg.inv(Pzz) # Kalman gain
                 innovation = measurement.z - z_mean # measurement innovation
-                innovation[1] = (innovation[1] + math.pi) % (2 * math.pi) - math.pi # shift to ]-pi, pi]
+                innovation[-1] = normalize_angle(innovation[-1])
                 x = y_mean + K @ innovation
-                x[2] = (x[2] + math.pi) % (2 * math.pi) - math.pi # shift to ]-pi, pi]
+                x[-1] = normalize_angle(x[-1])
                 P = Pyy - K @ Pzz @ K.T
-                posterior = State(control.t, x=x, P=P)
-                posterior_list.append(posterior)
 
-        if len(posterior_list) > 1:
-            x = np.mean([post.x for post in posterior_list], axis=0)
-            x[2] = (x[2] + math.pi) % (2 * math.pi) - math.pi # shift to ]-pi, pi]
-            P = np.mean([post.P for post in posterior_list], axis=0)
-            if DEBUG:
-                print(f"Number of measurements: {len(measurements)}, used for update: {len(posterior_list)}")
-            posterior = State(control.t, x=x, P=P)
+                posterior = State(control.t, x=x, P=P)
+
+                # for next measurement, use posterior as prior
+                y_mean = posterior.x
+                Pyy = posterior.P
 
     if posterior is None:
         posterior = State(control.t, x=y_mean, P=Pyy)
@@ -310,9 +287,9 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
 def generate_sigma_points(prior: "State", alpha=1e-3, kappa=0, beta=2): # need to convert state to numpy array
     n = prior.x.shape[0]
     lambda_ = alpha**2 * (n + kappa) - n
-    sigma_points = np.zeros((2 * n + 1, 3))
+    sigma_points = np.zeros((2 * n + 1, n))
     sigma_points[0] = prior.x
-    sqrt_matrix = np.linalg.cholesky((n + lambda_) * prior.P, upper=False)
+    sqrt_matrix = np.linalg.cholesky((n + lambda_) * prior.P)
     for i in range(n):
         sigma_points[i + 1]     = prior.x + sqrt_matrix[:, i]
         sigma_points[i + 1 + n] = prior.x - sqrt_matrix[:, i]
@@ -331,32 +308,55 @@ def compute_weights(n, alpha, kappa, beta):
 
 def compute_mean_and_covariance(Y, Q, weights_mean, weights_cov): # (Y, Q) or (Z, R)
     mean = np.sum(weights_mean[:, None] * Y, axis=0)
+    mean[-1] = math.atan2(np.sum(weights_mean * np.sin(Y[:, -1])), np.sum(weights_mean * np.cos(Y[:, -1]))) # theta, bearing 
     cov = Q.copy()
     for i in range(Y.shape[0]):
         diff = Y[i] - mean
+        diff[-1] = normalize_angle(diff[-1])
         cov += weights_cov[i] * np.outer(diff, diff)
     return mean, cov
 
 def compute_cross_covariance(Y, y_mean, Z, z_mean, weights):
     cross_cov = np.zeros((Y.shape[1], Z.shape[1]))
     for i in range(Y.shape[0]):
-        cross_cov += weights[i] * np.outer(Y[i] - y_mean, Z[i] - z_mean)
+        dy = Y[i] - y_mean
+        dz = Z[i] - z_mean
+        dy[-1] = normalize_angle(dy[-1])
+        dz[-1] = normalize_angle(dz[-1])
+        cross_cov += weights[i] * np.outer(dy, dz)
+        # cross_cov += weights[i] * np.outer(Y[i] - y_mean, Z[i] - z_mean)
     return cross_cov
 
 ### PLOTTING ###
 
-def plot_state(fig, ax, ds_State, label):
+def ds_Plot(ds_, title, labels, colors):
+    ds_State = ds_[0]
+    ds_Landmark_GroundTruth = ds_[1]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20,10))
+    for ax in (ax1, ax2):
+        for label, state, color in zip(labels, ds_State, colors):
+            plot_state(fig, ax, state, label, color)
+        plot_landmarks(fig, ax, ds_Landmark_GroundTruth)
+    zoom = 1
+    ax2.set_xlim(ds_State[0][0].x[0]-zoom, ds_State[0][0].x[0]+zoom)
+    ax2.set_ylim(ds_State[0][0].x[1]-zoom, ds_State[0][0].x[1]+zoom)
+    fig.suptitle(title)
+
+def plot_state(fig, ax, ds_State, label, color='blue'):
     ds_x = [state.x[0] for state in ds_State]
     ds_y = [state.x[1] for state in ds_State]
     ds_theta = [state.x[2] for state in ds_State]
 
-    ax.scatter(ds_x[0], ds_y[0], marker='x', label=f'Start {label}')
-    ax.scatter(ds_x[-1], ds_y[-1], marker='*', label=f'End {label}')
+    m = 20 # quiver spacing
+    ds_x_q = ds_x[::m]
+    ds_y_q = ds_y[::m]
+    ds_theta_q = ds_theta[::m]
 
-    ax.plot(ds_x, ds_y, label=label)
-    # ax.quiver(x, y, np.cos(theta), np.sin(theta), color='r', scale=20)
-    ax.quiver(ds_x[0], ds_y[0], math.cos(ds_theta[0]), math.sin(ds_theta[0]), width=0.005, scale=20, color='r', label=f'Start orientation {label}')
-    ax.quiver(ds_x[-1], ds_y[-1], math.cos(ds_theta[-1]), math.sin(ds_theta[-1]), width=0.005, scale=20, color='b', label=f'End orientation {label}')
+    ax.scatter(ds_x[0], ds_y[0], marker='x', label=f'Start {label}', color=color)
+    ax.scatter(ds_x[-1], ds_y[-1], marker='*', label=f'End {label}', color=color)
+
+    ax.plot(ds_x, ds_y, label=label, color=color)
+    ax.quiver(ds_x_q, ds_y_q, np.cos(ds_theta_q), np.sin(ds_theta_q), color=color, scale=15, width=0.002, label=f'Orientation {label}', alpha=0.2)
     ax.set_xlabel('X position (m)')
     ax.set_ylabel('Y position (m)')
     ax.legend()
@@ -427,16 +427,3 @@ class Measurement: # used for measurements and estimated measurements
 
 if __name__ == "__main__":
     main()
-
-
-
-
-# def compute_weights(n, weight_0):
-#     weights = np.zeros(2 * n + 1)
-#     weights[0] = weight_0
-#     for i in range(1, 2 * n + 1):
-#         weights[i] = (1 - weight_0) / (2 * n)
-#     sum_weights = np.sum(weights)
-#     if abs(sum_weights - 1.0) > 1e-5:
-#         print(f"Weights do not sum to 1, sum is {sum_weights}")
-#     return weights
