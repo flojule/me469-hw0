@@ -22,7 +22,7 @@ def main():
     ds_Control, ds_GroundTruth, ds_Landmark_GroundTruth, ds_Measurement = import_data(i, dt=dt, export=export)
 
     # reduce size for testing
-    k = 1000
+    k = 27000
     ds_Control = ds_Control[0:k]
     ds_GroundTruth = ds_GroundTruth[0:k+1]
 
@@ -68,14 +68,15 @@ def main():
 
     # ------------- Part B -------------
     if partB:
-        #UKF parameters
+        # --- UKF parameters ---
         state_0 = ds_GroundTruth[0] # initial state from ground truth
         state_0.P = np.diag([0.001, 0.001, 0.001]) # initial covariance
-        Q = np.diag([0.05, 0.05, 0.05]) # process noise covariance
-        R = np.diag([0.05, 0.05]) # measurement noise covariance
-        alpha, kappa, beta = 0.1, 0.0, 2.0 # 0.001, 0.0, 2.0
+        Q = np.diag([0.02, 0.02, 0.02]) # 0.02 all | process noise covariance
+        R = np.diag([0.01, 0.01]) # 0.01 all | measurement noise covariance
+        alpha, kappa, beta = 0.1, 0.0, 2.0 # 0.1, 0.0, 2.0
         weights_mean, weights_cov = compute_weights(3, alpha, kappa, beta) # n=3 for (x, y, theta)
 
+        # --- UKF loop ---
         UKF_State = []
         UKF_State.append(state_0)
         for control in ds_Control: # first measurement happens at t=11.12, step 557
@@ -83,21 +84,23 @@ def main():
             measurements = [measurement for measurement in ds_Measurement if abs(measurement.t - control.t) < 0.02] # find all measurements at this time step
             posterior = ukf(prior, control, measurements, ds_Landmark_GroundTruth, Q, R, weights_mean, weights_cov, alpha, kappa, beta) # accounts for no measurements if list is empty
             UKF_State.append(posterior)
+        if DEBUG:
+            print(f"\n Final state ground truth / estimate")
+            print(f"(x, y, theta) = ({ds_GroundTruth[-1].x[0]:.3f} m, {ds_GroundTruth[-1].x[1]:.3f} m, {ds_GroundTruth[-1].x[2]:.3f} rad)")
+            print(f"(x, y, theta) = ({UKF_State[-1].x[0]:.3f} m, {UKF_State[-1].x[1]:.3f} m, {UKF_State[-1].x[2]:.3f} rad)")
 
-        print(f"\n Final state ground truth / estimate")
-        print(f"(x, y, theta) = ({ds_GroundTruth[-1].x[0]:.3f} m, {ds_GroundTruth[-1].x[1]:.3f} m, {ds_GroundTruth[-1].x[2]:.3f} rad)")
-        print(f"(x, y, theta) = ({UKF_State[-1].x[0]:.3f} m, {UKF_State[-1].x[1]:.3f} m, {UKF_State[-1].x[2]:.3f} rad)")
-
-        DR_State = dead_reckoning(ds_GroundTruth[0], ds_Control) # as a reference for now
-
+        # --- PLOTTING ---
         title = f"Robot trajectories, UKF, based on ds{i}_Control.dat and ds{i}_Measurement.dat"
-        # ds_ = [[ds_GroundTruth, UKF_State, DR_State], ds_Landmark_GroundTruth]
-        ds_ = [[ds_GroundTruth, UKF_State], ds_Landmark_GroundTruth]
         labels = ["Ground truth", "UKF", "Dead reckoning"]
         colors = ["blue", "green", "orange"]
+        if DEBUG:
+            DR_State = dead_reckoning(ds_GroundTruth[0], ds_Control)
+            # ds_ = [[ds_GroundTruth, UKF_State, DR_State], ds_Landmark_GroundTruth]
+            ds_ = [[ds_GroundTruth, UKF_State], ds_Landmark_GroundTruth]
+            plot_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=colors)
+        else:
+            ds_ = [[ds_GroundTruth, UKF_State], ds_Landmark_GroundTruth]
         ds_Plot(ds_, title, labels, colors)
-        plot_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=colors)
-
 
     plt.show()
 
@@ -265,7 +268,7 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
                 z_mean, Pzz = compute_mean_and_covariance(Z_np, R, weights_mean, weights_cov) # same weights for mean and covariance
 
                 # z_mean = Z_np[0] # cheat mean
-                
+
                 Pyz = compute_cross_covariance(Y_np, y_mean, Z_np, z_mean, weights_cov) # cross covariance
                 K = Pyz @ np.linalg.inv(Pzz) # Kalman gain
                 innovation = measurement.z - z_mean # measurement innovation
@@ -329,26 +332,14 @@ def compute_weights(n, alpha, kappa, beta):
         weights_mean[i] = 1 / (2 * (n + lambda_))
         weights_cov[i] = 1 / (2 * (n + lambda_))
 
-    print(f"lambda: {lambda_}, n + lambda: {n + lambda_}")
-    print(f"weights mean: {weights_mean}")
-    print(f"weights cov: {weights_cov}")
-
-    # cheat weight
+    # weights independent of alpha/lambda
     weights_mean[0] = 0.0
     weights_cov[0] = 0.0
     weights_mean[1:] = 1 / (2 * n)
     weights_cov[1:] = 1 / (2 * n)
-
-    sum_mean = np.sum(weights_mean)
-    sum_cov = np.sum(weights_cov)
-    if abs(sum_mean - 1.0) > 1e-6:
-        print(f"Weights for mean do not sum to 1, but to {sum_mean}")
-    if abs(sum_cov - 1.0) > 1e-6:
-        print(f"Weights for covariance do not sum to 1, but to {sum_cov}")
     return weights_mean, weights_cov
 
 def compute_mean_and_covariance(Y, Q, weights_mean, weights_cov): # (Y, Q) or (Z, R)
-    # mean = np.zeros(Y.shape[1])
     mean = np.sum(weights_mean[:, None] * Y, axis=0)
 
     # mean[-1] = math.atan2(np.sum(weights_mean * np.sin(Y[:, -1])), np.sum(weights_mean * np.cos(Y[:, -1]))) # theta, bearing
@@ -446,15 +437,14 @@ def plot_measurement_predictions(fig, axes, ds_State, ds_Landmark_GroundTruth):
 
 def plot_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=None):
     plot_state_errors(ds_GroundTruth, UKF_State, DR_State, colors)
-    plot_innovation(UKF_State) 
+    # plot_innovation(UKF_State) 
 
 def plot_state_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=None):
-    fig, ax = plt.subplots(3, 2, figsize=(10,10))
+    fig, ax = plt.subplots(3, 2, figsize=(20,10))
     labels_state = ['X position (m)', 'Y position (m)', 'Orientation (rad)']
     labels_error = ['X position error (m)', 'Y position error (m)', 'Orientation error (rad)']
     T = min(len(ds_GroundTruth), len(UKF_State))
     t = [UKF_State[i].t for i in range(len(UKF_State))]
-
 
     for i in range(3):
         state_gt = [ds_GroundTruth[j].x[i] for j in range(T)]
@@ -531,7 +521,6 @@ class State:
         self.innovation = None
         self.measurement = None
         self.z_mean = None
-
 
 class Control:
     def __init__(self, t, v, omega, dt):
