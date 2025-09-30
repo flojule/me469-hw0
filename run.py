@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+import itertools
 
 def main():
     global DEBUG
@@ -10,7 +11,7 @@ def main():
     partA = False
     partB = True
 
-    export = True # export resampled data files
+    export = False # export resampled data files
     use_resampled = True # use resampled data files
     dt = 1/20 # resampling timestep
 
@@ -20,11 +21,8 @@ def main():
         i = str(i) + "_RS"
         
     ds_Control, ds_GroundTruth, ds_Landmark_GroundTruth, ds_Measurement = import_data(i, dt=dt, export=export)
-
-    # reduce size for testing
-    # k = 27000
-    # ds_Control = ds_Control[0:k]
-    # ds_GroundTruth = ds_GroundTruth[0:k+1]
+    colors = ["Blue", "Green", "Red", "Yellow", "Purple", "Orange",
+              "Pink", "Brown", "Black", "White", "Gray", "Cyan", "Magenta"] # for plotting multiple datasets
 
     # ------------- Part A -------------
     if partA:
@@ -41,7 +39,7 @@ def main():
         DR_State = dead_reckoning(State(x=(0,0,0)), _Control) # start at (x, y, theta) = (0, 0, 0)
         fig, ax = plt.subplots(figsize=(10,5))
         ax.set_title("Robot trajectories, dead reckoning, based on the 6 given control inputs")
-        plot_state(fig, ax, DR_State, "Motion model")
+        plot_state(fig, ax, DR_State, "Motion model", colors[1])
 
         # Q3:
         DR_State = dead_reckoning(ds_GroundTruth[0], ds_Control) # starting at first ground truth state
@@ -49,8 +47,7 @@ def main():
         title = f"Robot trajectories, dead reckoning, based on ds{i}_Control.dat and ds{i}_Measurement.dat"
         ds_ = [[ds_GroundTruth, DR_State], ds_Landmark_GroundTruth]
         labels = ["Ground truth", "Dead reckoning"]
-        colors = ["blue", "orange"]
-        ds_Plot(ds_, title, labels, colors)
+        ds_Plot(ds_, title, labels, colors[0:2])
 
         # Q6:
         test_State = [State(x=[2.0, 3.0, 0.0]), State(x=[0.0, 3.0, 0.0]), State(x=[1.0, -2.0, 0.0])]
@@ -68,40 +65,50 @@ def main():
 
     # ------------- Part B -------------
     if partB:
-        # --- UKF parameters ---
-        state_0 = ds_GroundTruth[0] # initial state from ground truth
-        state_0.P = np.diag([1e-4, 1e-4, 1e-4]) # initial covariance
-        q, r = 1e-6, 1e-2
-        Q = np.diag([q, q, q]) # all | process noise covariance
-        R = np.diag([r, r]) # all | measurement noise covariance
-        alpha, kappa, beta = 0.1, 0.0, 2.0 # 0.1, 0.0, 2.0
-        weights_mean, weights_cov = compute_weights(3, alpha, kappa, beta) # n=3 for (x, y, theta)
-
-        # --- UKF loop ---
-        UKF_State = []
-        UKF_State.append(state_0)
-        for control in ds_Control: # first measurement happens at t=11.12, step 557
-            prior = UKF_State[-1]
-            measurements = [measurement for measurement in ds_Measurement if abs(measurement.t - control.t) < 0.02] # find all measurements at this time step
-            posterior = ukf(prior, control, measurements, ds_Landmark_GroundTruth, Q, R, weights_mean, weights_cov, alpha, kappa, beta) # accounts for no measurements if list is empty
-            UKF_State.append(posterior)
         if DEBUG:
-            print(f"\n Final state ground truth / estimate")
-            print(f"(x, y, theta) = ({ds_GroundTruth[-1].x[0]:.3f} m, {ds_GroundTruth[-1].x[1]:.3f} m, {ds_GroundTruth[-1].x[2]:.3f} rad)")
-            print(f"(x, y, theta) = ({UKF_State[-1].x[0]:.3f} m, {UKF_State[-1].x[1]:.3f} m, {UKF_State[-1].x[2]:.3f} rad)")
+            k = 2000 # reduce size for testing
+            ds_Control = ds_Control[0:k]
+            ds_GroundTruth = ds_GroundTruth[0:k+1]
 
+        p_ = [1e-4] # initial covariance                    1e-4 --- 1e-3<p<1e-6
+        q_ = [1e-8, 1e-9] # process noise covariance        1e-8 --- 1e-5<q<e-9
+        r_ = [1e-5, 1e-6] # measurement noise covariance    1e-5 --- 1e-2<r<e-6
+        alpha_ = [0.1] # UKF parameter                      0.6  --- 0.1<alpha<1.0
+        ds_ = [[ds_GroundTruth], ds_Landmark_GroundTruth] # add list of trial states to this list
+        labels = ["Ground truth"]
+
+        for (p, q, r, alpha) in itertools.product(p_, q_, r_, alpha_): # grid search over parameters
+            # --- UKF parameters ---
+            state_0 = ds_GroundTruth[0] # initial state from ground truth
+            kappa, beta = 0.0, 2.0
+
+            state_0.P = np.diag([p, p, p]) # initial covariance
+            Q = np.diag([q, q, q]) # process noise covariance
+            R = np.diag([r, r]) # measurement noise covariance
+            weights_mean, weights_cov = compute_weights(3, alpha, kappa, beta) # n=3 for (x, y, theta)
+
+            # --- UKF loop ---
+            UKF_State = []
+            UKF_State.append(state_0)
+            for control in ds_Control: # first measurement happens at t=11.12, step 557
+                prior = UKF_State[-1]
+                measurements = [measurement for measurement in ds_Measurement if abs(measurement.t - control.t) < 0.02] # find all measurements at this time step
+                posterior = ukf(prior, control, measurements, ds_Landmark_GroundTruth, Q, R, weights_mean, weights_cov, alpha, kappa, beta) # accounts for no measurements if list is empty
+                UKF_State.append(posterior)
+            if DEBUG:
+                print(f"\n Final state ground truth / estimate")
+                print(f"(x, y, theta) = ({ds_GroundTruth[-1].x[0]:.3f} m, {ds_GroundTruth[-1].x[1]:.3f} m, {ds_GroundTruth[-1].x[2]:.3f} rad)")
+                print(f"(x, y, theta) = ({UKF_State[-1].x[0]:.3f} m, {UKF_State[-1].x[1]:.3f} m, {UKF_State[-1].x[2]:.3f} rad)")
+
+            # --- PLOTTING ---
+            ds_[0].append(UKF_State)
+            labels.append(f"UKF p={p}, q={q}, r={r}, alpha={alpha}")
+        
         # --- PLOTTING ---
-        title = f"Robot trajectories, UKF, based on ds{i}_Control.dat and ds{i}_Measurement.dat"
-        labels = ["Ground truth", "UKF", "Dead reckoning"]
-        colors = ["blue", "green", "orange"]
-        if DEBUG:
-            DR_State = dead_reckoning(ds_GroundTruth[0], ds_Control)
-            # ds_ = [[ds_GroundTruth, UKF_State, DR_State], ds_Landmark_GroundTruth]
-            ds_ = [[ds_GroundTruth, UKF_State], ds_Landmark_GroundTruth]
-            plot_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=colors)
-        else:
-            ds_ = [[ds_GroundTruth, UKF_State], ds_Landmark_GroundTruth]
-        ds_Plot(ds_, title, labels, colors)
+        title = f"Robot trajectories, UKF, based on ds{i}_Control.dat and ds{i}_Measurement.dat, p={p}, q={q}, r={r}, alpha={alpha}"
+        ds_Plot(ds_, title, labels, colors[0:len(labels)])
+        plot_errors(ds_[0][0], ds_[0][1:], labels, colors[0:len(labels)])
+
 
     plt.show()
 
@@ -109,8 +116,8 @@ def main():
 
 def import_data(i, dt=None, export=False, robot_id=False):
     ds_Control_raw = import_dat(f'ds{i}/ds{i}_Control.dat')
-    ds_GroundTruth_raw = import_dat(f'ds{i}/ds{i}_GroundTruth.dat')
-    ds_Landmark_GroundTruth_raw = import_dat(f'ds{i}/ds{i}_Landmark_GroundTruth.dat') 
+    ds_GroundTruth_raw = import_dat(f'ds{i}/ds{i}_Groundtruth.dat')
+    ds_Landmark_GroundTruth_raw = import_dat(f'ds{i}/ds{i}_Landmark_Groundtruth.dat') 
     ds_Measurement_raw = import_dat(f'ds{i}/ds{i}_Measurement.dat') 
     ds_Barcodes = import_dat(f'ds{i}/ds{i}_Barcodes.dat')  
 
@@ -141,13 +148,13 @@ def import_data(i, dt=None, export=False, robot_id=False):
         i = str(i) + "_RS" # resampled
         fn_control = f'ds{i}/ds{i}_Control.dat'
         fn_measurement = f'ds{i}/ds{i}_Measurement.dat'
-        fn_groundtruth = f'ds{i}/ds{i}_GroundTruth.dat'
+        fn_groundtruth = f'ds{i}/ds{i}_Groundtruth.dat'
         export_dat(fn_control, ds_Control_raw)
         export_dat(fn_measurement, ds_Measurement_raw)
         export_dat(fn_groundtruth, ds_GroundTruth_raw)
 
         fn_barecodes = f'ds{i}/ds{i}_Barcodes.dat' # adding to have complete ds_RS folder
-        fn_landmark = f'ds{i}/ds{i}_Landmark_GroundTruth.dat'
+        fn_landmark = f'ds{i}/ds{i}_Landmark_Groundtruth.dat'
         export_dat(fn_barecodes, ds_Barcodes)
         export_dat(fn_landmark, ds_Landmark_GroundTruth_raw)
 
@@ -385,7 +392,7 @@ def ds_Plot(ds_, title, labels, colors):
     ax2.set_ylim(ds_State[0][0].x[1]-zoom, ds_State[0][0].x[1]+zoom)
     fig.suptitle(title)
 
-def plot_state(fig, ax, ds_State, label, color='blue'):
+def plot_state(fig, ax, ds_State, label, color):
     ''' plot robot trajectory and orientation for one dataset '''
     ds_x = [state.x[0] for state in ds_State]
     ds_y = [state.x[1] for state in ds_State]
@@ -396,11 +403,11 @@ def plot_state(fig, ax, ds_State, label, color='blue'):
     ds_y_q = ds_y[::m]
     ds_theta_q = ds_theta[::m]
 
-    ax.scatter(ds_x[0], ds_y[0], marker='x', label=f'Start {label}', color=color)
-    ax.scatter(ds_x[-1], ds_y[-1], marker='*', label=f'End {label}', color=color)
+    # ax.scatter(ds_x[0], ds_y[0], marker='x', label=f'Start {label}', color=color)
+    # ax.scatter(ds_x[-1], ds_y[-1], marker='*', label=f'End {label}', color=color)
 
     ax.plot(ds_x, ds_y, label=label, color=color)
-    ax.quiver(ds_x_q, ds_y_q, np.cos(ds_theta_q), np.sin(ds_theta_q), color=color, scale=15, width=0.002, label=f'Orientation {label}', alpha=0.2)
+    # ax.quiver(ds_x_q, ds_y_q, np.cos(ds_theta_q), np.sin(ds_theta_q), scale=15, width=0.002, label=f'Orientation {label}', alpha=0.2, color=color)
     ax.set_xlabel('X position (m)')
     ax.set_ylabel('Y position (m)')
     ax.legend()
@@ -444,57 +451,45 @@ def plot_measurement_predictions(fig, axes, ds_State, ds_Landmark_GroundTruth):
         ax.axis('equal')
         ax.grid(True)
 
-def plot_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=None):
+def plot_errors(ds_GroundTruth, States, titles, colors):
     ''' plot state errors and innovation for UKF'''
-    plot_state_errors(ds_GroundTruth, UKF_State, DR_State, colors)
-    # plot_innovation(UKF_State) 
+    plot_state_errors(ds_GroundTruth, States, titles, colors)
+    # plot_innovation(States) 
 
-def plot_state_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=None):
+def plot_state_errors(ds_GroundTruth, States, labels, colors):
     ''' plot state errors for UKF and optionally dead reckoning '''
     fig, ax = plt.subplots(3, 2, figsize=(20,10))
     labels_state = ['X position (m)', 'Y position (m)', 'Orientation (rad)']
     labels_error = ['X position error (m)', 'Y position error (m)', 'Orientation error (rad)']
-    T = min(len(ds_GroundTruth), len(UKF_State))
-    t = [UKF_State[i].t for i in range(len(UKF_State))]
+    T = min(len(ds_GroundTruth), len(States[0]))
+    ds_GroundTruth = ds_GroundTruth[0:T]
+    States = [state[0:T] for state in States] # truncate all states to same length
+    UKF_State = States[0]
+    t = [UKF_State[i].t for i in range(len(UKF_State))] # time vector
 
     for i in range(3):
         state_gt = [ds_GroundTruth[j].x[i] for j in range(T)]
-        state = [UKF_State[j].x[i] for j in range(T)]
-        ax[i, 0].plot(t, state_gt, label='Ground truth', color=colors[0])
-        ax[i, 0].plot(t, state, label='UKF estimate', color=colors[1])
+        ax[i, 0].plot(t, state_gt, label=labels[0], color=colors[0])
 
-        if DR_State is not None:
-            state_dr = [DR_State[j].x[i] for j in range(T)]
-            ax[i, 0].plot(t, state_dr, label='DR estimate', color=colors[2])
+        for s, state in enumerate(States): # plot all states
+            state_ = [state[j].x[i] for j in range(T)]
+            ax[i, 0].plot(t, state_, label=labels[s+1], color=colors[s+1])
 
+            errors = np.array([[state[i].x[j] - ds_GroundTruth[i].x[j] for j in range(3)] for i in range(T)])
+            if i == 2: # normalize angle error
+                errors[:, i] = np.array([normalize_angle(errors[j, i]) for j in range(T)])
+            ax[i, 1].plot(t, errors[:, i], color=colors[s+1])
+        
         ax[i, 0].set_xlabel('Time step')
         ax[i, 0].set_ylabel(labels_state[i])
         ax[i, 0].grid(True)
         ax[i, 0].legend()
-
-        errors = np.array([[UKF_State[i].x[j] - ds_GroundTruth[i].x[j] for j in range(3)] for i in range(T)])
-        if i == 2: # normalize angle error
-            errors[:, i] = np.array([normalize_angle(errors[j, i]) for j in range(T)])
-        ax[i, 1].plot(t, errors[:, i], label='Error', color=colors[1])
-
-        if DR_State is not None:
-            errors_dr = np.array([[DR_State[i].x[j] - ds_GroundTruth[i].x[j] for j in range(3)] for i in range(T)])
-            if i == 2: # normalize angle error
-                errors_dr[:, i] = np.array([normalize_angle(errors_dr[j, i]) for j in range(T)])
-            ax[i, 1].plot(t, errors_dr[:, i], label='DR Error', color=colors[2])
 
         ax[i, 1].set_xlabel('Time (s)')
         ax[i, 1].set_ylabel(labels_error[i])
         ax[i, 1].grid(True)
         ax[i, 1].legend()
 
-    if DR_State is not None:
-        for j in range(3):
-            state_dr = [DR_State[j].x[i] for j in range(T)]
-            errors_dr = np.array([[DR_State[i].x[j] - ds_GroundTruth[i].x[j] for j in range(3)] for i in range(T)])
-
-            if j == 2: # normalize angle error
-                errors_dr[:, j] = np.array([normalize_angle(errors_dr[k, j]) for k in range(T)])
     fig.suptitle('UKF State Estimation Errors')
 
 def plot_innovation(UKF_State):
