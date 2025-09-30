@@ -4,14 +4,14 @@ import matplotlib.pyplot as plt
 
 def main():
     global DEBUG
-    DEBUG = True
+    DEBUG = False
 
     i = 0 # dataset index
     partA = False
     partB = True
 
     export = True # export resampled data files
-    use_resampled = False # use resampled data files
+    use_resampled = True # use resampled data files
     dt = 1/20 # resampling timestep
 
     if use_resampled:
@@ -22,9 +22,9 @@ def main():
     ds_Control, ds_GroundTruth, ds_Landmark_GroundTruth, ds_Measurement = import_data(i, dt=dt, export=export)
 
     # reduce size for testing
-    k = 27000
-    ds_Control = ds_Control[0:k]
-    ds_GroundTruth = ds_GroundTruth[0:k+1]
+    # k = 27000
+    # ds_Control = ds_Control[0:k]
+    # ds_GroundTruth = ds_GroundTruth[0:k+1]
 
     # ------------- Part A -------------
     if partA:
@@ -70,9 +70,10 @@ def main():
     if partB:
         # --- UKF parameters ---
         state_0 = ds_GroundTruth[0] # initial state from ground truth
-        state_0.P = np.diag([0.001, 0.001, 0.001]) # initial covariance
-        Q = np.diag([0.02, 0.02, 0.02]) # 0.02 all | process noise covariance
-        R = np.diag([0.01, 0.01]) # 0.01 all | measurement noise covariance
+        state_0.P = np.diag([1e-4, 1e-4, 1e-4]) # initial covariance
+        q, r = 1e-6, 1e-2
+        Q = np.diag([q, q, q]) # all | process noise covariance
+        R = np.diag([r, r]) # all | measurement noise covariance
         alpha, kappa, beta = 0.1, 0.0, 2.0 # 0.1, 0.0, 2.0
         weights_mean, weights_cov = compute_weights(3, alpha, kappa, beta) # n=3 for (x, y, theta)
 
@@ -162,8 +163,10 @@ def export_dat(filename, data):
         np.savetxt(file, data, fmt='%.3f')
 
 def resample_data(dt, ds_Control_raw, ds_Measurement_raw, ds_GroundTruth_raw):
-    # Control and GroundTruth linearly interpolated to fixed timestep
-    # Measurements rounded to nearest timestep
+    ''' resample data to fixed timestep dt 
+    control and GroundTruth linearly interpolated to fixed timestep
+    measurements rounded to nearest timestep
+    '''
 
     min_time = ds_GroundTruth_raw[0, 0]
     ds_Control_raw[:, 0] -= min_time
@@ -190,7 +193,8 @@ def resample_data(dt, ds_Control_raw, ds_Measurement_raw, ds_GroundTruth_raw):
 
     return ds_Control, ds_Measurement, ds_GroundTruth
     
-def get_robot_id(ds_Measurement, ds_Barcodes): # find robot id
+def get_robot_id(ds_Measurement, ds_Barcodes):
+    ''' find robot id by checking which barcode id is not in the measurements '''
     ids = set()
     ids.update(measurement.id for measurement in ds_Measurement)
     robot_id_possible = set()
@@ -205,21 +209,23 @@ def get_robot_id(ds_Measurement, ds_Barcodes): # find robot id
 
 ### MOTION MODEL ###
 
-def motion_model(prior: "State", control: "Control", Q=np.zeros((3, 3))): # uses prior state and a control object, returns the next state
+def motion_model(prior: "State", control: "Control", Q=np.zeros((3, 3))): 
+    ''' computes next state given a prior state and a control input '''
     x = np.zeros(prior.x.shape)
     if control.omega == 0:
-        x[0] = prior.x[0] + control.v * math.cos(prior.x[2]) * control.dt #+ np.random.normal(0, math.sqrt(Q[0,0]))
-        x[1] = prior.x[1] + control.v * math.sin(prior.x[2]) * control.dt #+ np.random.normal(0, math.sqrt(Q[1,1]))
-        x[2] = prior.x[2] #+ np.random.normal(0, math.sqrt(Q[2,2]))
+        x[0] = prior.x[0] + control.v * math.cos(prior.x[2]) * control.dt
+        x[1] = prior.x[1] + control.v * math.sin(prior.x[2]) * control.dt
+        x[2] = prior.x[2]
     else:
-        x[0] = prior.x[0] + (control.v / control.omega) * (math.sin(prior.x[2] + control.omega * control.dt) - math.sin(prior.x[2])) #+ np.random.normal(0, math.sqrt(Q[0,0]))
-        x[1] = prior.x[1] + (control.v / control.omega) * (math.cos(prior.x[2]) - math.cos(prior.x[2] + control.omega * control.dt)) #+ np.random.normal(0, math.sqrt(Q[1,1]))
-        x[2] = prior.x[2] + control.omega * control.dt #+ np.random.normal(0, math.sqrt(Q[2,2]))
+        x[0] = prior.x[0] + (control.v / control.omega) * (math.sin(prior.x[2] + control.omega * control.dt) - math.sin(prior.x[2]))
+        x[1] = prior.x[1] + (control.v / control.omega) * (math.cos(prior.x[2]) - math.cos(prior.x[2] + control.omega * control.dt))
+        x[2] = prior.x[2] + control.omega * control.dt
     x[-1] = normalize_angle(x[-1])
     posterior = State(control.t, x=x)
     return posterior
 
-def dead_reckoning(state_0: "State", ds_Control: list["Control"]): # loops motion model
+def dead_reckoning(state_0: "State", ds_Control: list["Control"]):
+    ''' dead reckoning implementation, loops motion model, returns list of states '''
     DR_State = []
     DR_State.append(state_0)
     for control in ds_Control:
@@ -233,30 +239,34 @@ def normalize_angle(angle): # shift to ]-pi, pi]
 
 ### MEASUREMENT MODEL ###
 
-def measurement_model(state: "State", landmark: "Landmark", R=np.zeros((2, 2))): # uses current state and landmark ground truth as input, returns estimated landmarks as output
-    range = math.sqrt((landmark.x[0] - state.x[0])**2 + (landmark.x[1] - state.x[1])**2) #+ np.random.normal(0, math.sqrt(R[0,0]))
-    bearing = math.atan2(landmark.x[1] - state.x[1], landmark.x[0] - state.x[0]) - state.x[2] #+ np.random.normal(0, math.sqrt(R[1,1]))
+def measurement_model(state: "State", landmark: "Landmark", R=np.zeros((2, 2))):
+    ''' range and bearing measurement model, given a state and a landmark '''
+    range = math.sqrt((landmark.x[0] - state.x[0])**2 + (landmark.x[1] - state.x[1])**2)
+    bearing = math.atan2(landmark.x[1] - state.x[1], landmark.x[0] - state.x[0]) - state.x[2]
     bearing = normalize_angle(bearing)
     measurement = Measurement(state.t, landmark.id, range, bearing)  
     return measurement
 
 def get_xy_measurement(state: "State", measurement: "Measurement"):
+    ''' convert polar measurement to Cartesian coordinates '''
     x = state.x[0] + measurement.z[0] * math.cos(measurement.z[1] + state.x[2])
     y = state.x[1] + measurement.z[0] * math.sin(measurement.z[1] + state.x[2])
     return x, y
 
 ### UKF ###
 
-def ukf(prior: "State", control: "Control", measurements: list["Measurement"], ds_Landmark_GroundTruth: list["Landmark"], Q, R, weights_mean, weights_cov, alpha, kappa, beta):
+def ukf(prior: "State", control: "Control", measurements: list["Measurement"], ds_Landmark_GroundTruth: list["Landmark"], \
+        Q, R, weights_mean, weights_cov, alpha, kappa, beta):
+    ''' Unscented Kalman Filter implementation '''
     # Prediction step
     X_np = generate_sigma_points(prior, alpha, kappa, beta) # X are the sigma points, numpy array
     Y = [motion_model(State(x=sp), control, Q) for sp in X_np] # Y are the propagated sigma points
     Y_np = np.array([sp.x for sp in Y]) # convert object to numpy array
     y_mean, Pyy = compute_mean_and_covariance(Y_np, Q, weights_mean, weights_cov) # same weights for mean and covariance
     
+    # Correction step
     posterior = None
-    # measurements = []
-    if len(measurements) > 0: # Correction step
+    if len(measurements) > 0: 
         for measurement in measurements:
             Y_np = generate_sigma_points(State(x=y_mean, P=Pyy), alpha, kappa, beta) # new sigma points around predicted mean
             Y = [State(x=sp, P=Pyy) for sp in Y_np]
@@ -311,7 +321,8 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
 
     return posterior
 
-def generate_sigma_points(prior: "State", alpha=1e-3, kappa=0, beta=2): # need to convert state to numpy array
+def generate_sigma_points(prior: "State", alpha, kappa, beta):
+    ''' generate sigma points around prior mean '''
     n = prior.x.shape[0]
     lambda_ = alpha**2 * (n + kappa) - n
     sigma_points = np.zeros((2 * n + 1, n))
@@ -323,6 +334,7 @@ def generate_sigma_points(prior: "State", alpha=1e-3, kappa=0, beta=2): # need t
     return sigma_points
 
 def compute_weights(n, alpha, kappa, beta):
+    ''' compute weights for mean and covariance '''
     weights_mean = np.zeros(2 * n + 1)
     weights_cov = np.zeros(2 * n + 1)
     lambda_ = alpha**2 * (n + kappa) - n
@@ -332,21 +344,12 @@ def compute_weights(n, alpha, kappa, beta):
         weights_mean[i] = 1 / (2 * (n + lambda_))
         weights_cov[i] = 1 / (2 * (n + lambda_))
 
-    # weights independent of alpha/lambda
-    weights_mean[0] = 0.0
-    weights_cov[0] = 0.0
-    weights_mean[1:] = 1 / (2 * n)
-    weights_cov[1:] = 1 / (2 * n)
     return weights_mean, weights_cov
 
-def compute_mean_and_covariance(Y, Q, weights_mean, weights_cov): # (Y, Q) or (Z, R)
+def compute_mean_and_covariance(Y, Q, weights_mean, weights_cov):
+    ''' compute mean and covariance of sigma points Y with additive noise Q '''
     mean = np.sum(weights_mean[:, None] * Y, axis=0)
-
-    # mean[-1] = math.atan2(np.sum(weights_mean * np.sin(Y[:, -1])), np.sum(weights_mean * np.cos(Y[:, -1]))) # theta, bearing
-    ref = Y[0, -1] # reference angle for unwrapping
-    unwrapped = np.array([ref + normalize_angle(a - ref) for a in Y[:, -1]])
-    mean[-1] = ref + np.sum(weights_mean * (unwrapped - ref))
-    mean[-1] = normalize_angle(mean[-1])
+    mean[-1] = math.atan2(np.sum(weights_mean * np.sin(Y[:, -1])), np.sum(weights_mean * np.cos(Y[:, -1]))) # theta, bearing
 
     cov = Q.copy()
     for i in range(Y.shape[0]):
@@ -356,6 +359,7 @@ def compute_mean_and_covariance(Y, Q, weights_mean, weights_cov): # (Y, Q) or (Z
     return mean, cov
 
 def compute_cross_covariance(Y, y_mean, Z, z_mean, weights_cov):
+    ''' compute cross covariance between state sigma points Y and measurement sigma points Z '''
     cross_cov = np.zeros((Y.shape[1], Z.shape[1]))
     for i in range(Y.shape[0]):
         dy = Y[i] - y_mean
@@ -368,6 +372,7 @@ def compute_cross_covariance(Y, y_mean, Z, z_mean, weights_cov):
 ### PLOTTING ###
 
 def ds_Plot(ds_, title, labels, colors):
+    ''' plot multiple datasets, each dataset is a list of states and landmarks '''
     ds_State = ds_[0]
     ds_Landmark_GroundTruth = ds_[1]
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20,10))
@@ -381,6 +386,7 @@ def ds_Plot(ds_, title, labels, colors):
     fig.suptitle(title)
 
 def plot_state(fig, ax, ds_State, label, color='blue'):
+    ''' plot robot trajectory and orientation for one dataset '''
     ds_x = [state.x[0] for state in ds_State]
     ds_y = [state.x[1] for state in ds_State]
     ds_theta = [state.x[2] for state in ds_State]
@@ -402,6 +408,7 @@ def plot_state(fig, ax, ds_State, label, color='blue'):
     ax.grid(True)
 
 def plot_landmarks(fig, ax, ds_Landmarks):
+    ''' plot landmarks'''
     x = [landmark.x[0] for landmark in ds_Landmarks]
     y = [landmark.x[1] for landmark in ds_Landmarks]
     ax.scatter(x, y, marker='o', color='black', label='Landmarks')
@@ -409,7 +416,8 @@ def plot_landmarks(fig, ax, ds_Landmarks):
         ax.text(landmark.x[0], landmark.x[1], f'LM{landmark.id}')
         plot_uncertainty_ellipse(ax, landmark)
 
-def plot_uncertainty_ellipse(ax, landmark): # plot uncertainty ellipse for landmark, 2 times standard deviation
+def plot_uncertainty_ellipse(ax, landmark): 
+    ''' plot uncertainty ellipse for landmark, 2 times standard deviation '''
     from matplotlib.patches import Ellipse
     ellipse = Ellipse(xy=(landmark.x[0], landmark.x[1]),
                         width=2*landmark.stddev[0], height=2*landmark.stddev[1],
@@ -417,6 +425,7 @@ def plot_uncertainty_ellipse(ax, landmark): # plot uncertainty ellipse for landm
     ax.add_patch(ellipse)
 
 def plot_measurement_predictions(fig, axes, ds_State, ds_Landmark_GroundTruth):
+    ''' plot landmark measurements predictions '''
     for i, state in enumerate(ds_State):
         ax = axes[i]
         ax.set_title(f"(x, y, theta) = ({state.x[0]:.2f} m, {state.x[1]:.2f} m, {state.x[2]:.2f} rad)")
@@ -436,10 +445,12 @@ def plot_measurement_predictions(fig, axes, ds_State, ds_Landmark_GroundTruth):
         ax.grid(True)
 
 def plot_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=None):
+    ''' plot state errors and innovation for UKF'''
     plot_state_errors(ds_GroundTruth, UKF_State, DR_State, colors)
     # plot_innovation(UKF_State) 
 
 def plot_state_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=None):
+    ''' plot state errors for UKF and optionally dead reckoning '''
     fig, ax = plt.subplots(3, 2, figsize=(20,10))
     labels_state = ['X position (m)', 'Y position (m)', 'Orientation (rad)']
     labels_error = ['X position error (m)', 'Y position error (m)', 'Orientation error (rad)']
@@ -487,6 +498,7 @@ def plot_state_errors(ds_GroundTruth, UKF_State, DR_State=None, colors=None):
     fig.suptitle('UKF State Estimation Errors')
 
 def plot_innovation(UKF_State):
+    ''' plot measurement innovations for UKF'''
     measurements = [state.measurement.z for state in UKF_State if state.measurement is not None] # only plot measurements for landmarks that are estimated
     predicted_measurements = [state.z_mean for state in UKF_State if state.measurement is not None]
     t = [state.t for state in UKF_State if state.measurement is not None]
@@ -514,6 +526,7 @@ def plot_innovation(UKF_State):
 ### DATA STRUCTURES ###
 
 class State:
+    ''' represents the robot state at a given time '''
     def __init__(self, t=0.0, x=None, P=None):
         self.t = t
         self.x = np.array(x) if x is not None else np.zeros(3) # state (x, y, theta) at t (posterior)
@@ -523,6 +536,7 @@ class State:
         self.z_mean = None
 
 class Control:
+    ''' represents the control input at a given time '''
     def __init__(self, t, v, omega, dt):
         self.t = t
         self.v = v
@@ -530,12 +544,14 @@ class Control:
         self.dt = dt
 
 class Landmark:
+    ''' represents a landmark '''
     def __init__(self, id, x=None, stddev=None):
         self.id = int(id)
         self.x = np.array(x) if x is not None else np.zeros(2) # position (x, y)
         self.stddev = np.array(stddev) if stddev is not None else np.zeros(2) # standard deviation (x, y)
 
-class Measurement: # used for measurements and estimated measurements
+class Measurement:
+    ''' represents a landmark measurement, used for both actual measurements and estimated measurements '''
     def __init__(self, t, id, range, bearing):
         self.t = t
         self.z = np.array([range, bearing]) # measurement (range, bearing) at t
