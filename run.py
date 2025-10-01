@@ -497,7 +497,7 @@ def plot_state_errors(ds_GroundTruth, States, labels, colors):
         ax[i, 1].set_xlabel('Time (s)')
         ax[i, 1].set_ylabel(labels_error[i])
         ax[i, 1].grid(True)
-        ax[i, 1].legend()
+        # ax[i, 1].legend()
 
     fig.suptitle('UKF State Estimation Errors')
 
