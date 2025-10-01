@@ -244,6 +244,15 @@ def dead_reckoning(state_0: "State", ds_Control: list["Control"]):
 def normalize_angle(angle): # shift to ]-pi, pi]
     return (angle + math.pi) % (2 * math.pi) - math.pi 
 
+def motion_model_noise(posterior: "State", prior: "State", control: "Control"):
+
+    mu = 0.5
+    x0_ = 0.5 * (prior.x[0] + posterior.x[0]) + mu * (prior.x[1] - posterior.x[0] )
+    y0_ = 0.5 * (prior.x[1] + posterior.x[1]) + mu * (prior.x[0] - posterior.x[1] )
+    r_ = math.sqrt((x0_ - prior.x[0])**2 + (y0_ - prior.x[1])**2)
+
+    pass # TODO
+
 ### MEASUREMENT MODEL ###
 
 def measurement_model(state: "State", landmark: "Landmark", R=np.zeros((2, 2))):
@@ -267,7 +276,7 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
     ''' Unscented Kalman Filter implementation '''
     # Prediction step
     X_np = generate_sigma_points(prior, alpha, kappa, beta) # X are the sigma points, numpy array
-    Y = [motion_model(State(x=sp), control, Q) for sp in X_np] # Y are the propagated sigma points
+    Y = [motion_model(State(x=sp), control, Q=np.zeros((3, 3))) for sp in X_np] # Y are the propagated sigma points
     Y_np = np.array([sp.x for sp in Y]) # convert object to numpy array
     y_mean, Pyy = compute_mean_and_covariance(Y_np, Q, weights_mean, weights_cov) # same weights for mean and covariance
     
@@ -279,7 +288,7 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
             Y = [State(x=sp, P=Pyy) for sp in Y_np]
             if measurement.id in [landmark_.id for landmark_ in ds_Landmark_GroundTruth]: # if measurement id not in landmark ground truth, return prediction as posterior
                 landmark = [landmark_ for landmark_ in ds_Landmark_GroundTruth if landmark_.id == measurement.id][0] #  landmark corresponding to measurement
-                Z = [measurement_model(sp, landmark, R) for sp in Y] # Z are the estimated measurement sigma points (list of measurementobjects)
+                Z = [measurement_model(sp, landmark, R=np.zeros((2, 2))) for sp in Y] # Z are the estimated measurement sigma points (list of measurementobjects)
                 Z_np = np.array([m_est.z for m_est in Z]) # extract the measurement arrays from the Measurement objects
                 
                 z_mean, Pzz = compute_mean_and_covariance(Z_np, R, weights_mean, weights_cov) # same weights for mean and covariance
