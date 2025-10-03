@@ -21,8 +21,12 @@ def main():
         i = str(i) + "_RS"
         
     ds_Control, ds_GroundTruth, ds_Landmark_GroundTruth, ds_Measurement = import_data(i, dt=dt, export=export)
-    colors = ["Blue", "Green", "Red", "Yellow", "Purple", "Orange",
-              "Pink", "Brown", "Black", "White", "Gray", "Cyan", "Magenta"] # for plotting multiple datasets
+    colors = ["Blue", "Green", "Red", "Orange", "Pink", "Brown", "Purple", "Gray", "Cyan", "Magenta"] # for plotting multiple datasets
+    
+    if DEBUG:
+        k = 2000 # reduce size for testing
+        ds_Control = ds_Control[0:k]
+        ds_GroundTruth = ds_GroundTruth[0:k+1]
 
     # ------------- Part A -------------
     if partA:
@@ -65,19 +69,14 @@ def main():
 
     # ------------- Part B -------------
     if partB:
-        if DEBUG:
-            k = 2000 # reduce size for testing
-            ds_Control = ds_Control[0:k]
-            ds_GroundTruth = ds_GroundTruth[0:k+1]
-
-        p_ = [1e-4] # initial covariance                    1e-4 --- 1e-3<p<1e-6
-        q_ = [1e-8, 1e-9] # process noise covariance        1e-8 --- 1e-5<q<e-9
-        r_ = [1e-5, 1e-6] # measurement noise covariance    1e-5 --- 1e-2<r<e-6
-        alpha_ = [0.1] # UKF parameter                      0.6  --- 0.1<alpha<1.0
+        p_ = [1e-8] # initial covariance                    1e-4 --- 1e-3<p<1e-8
+        q_ = [1e-8, 1e-8] # process noise covariance        1e-10 --- 1e-5<q<e-10
+        r_ = [1e-4, 1e-5] # measurement noise covariance    1e-5 --- 1e-2<r<e-6
+        alpha_ = [0.1, 0.1] # UKF parameter                      0.6  --- 0.1<alpha<1.0
         ds_ = [[ds_GroundTruth], ds_Landmark_GroundTruth] # add list of trial states to this list
         labels = ["Ground truth"]
 
-        for (p, q, r, alpha) in itertools.product(p_, q_, r_, alpha_): # grid search over parameters
+        for (p, q, r, alpha) in zip(p_, q_, r_, alpha_): # grid search over parameters itertools.product
             # --- UKF parameters ---
             state_0 = ds_GroundTruth[0] # initial state from ground truth
             kappa, beta = 0.0, 2.0
@@ -92,9 +91,10 @@ def main():
             UKF_State.append(state_0)
             for control in ds_Control: # first measurement happens at t=11.12, step 557
                 prior = UKF_State[-1]
-                measurements = [measurement for measurement in ds_Measurement if abs(measurement.t - control.t) < 0.02] # find all measurements at this time step
+                measurements = [measurement for measurement in ds_Measurement if abs(measurement.t - control.t) < 0.01] # find all measurements at this time step
                 posterior = ukf(prior, control, measurements, ds_Landmark_GroundTruth, Q, R, weights_mean, weights_cov, alpha, kappa, beta) # accounts for no measurements if list is empty
                 UKF_State.append(posterior)
+
             if DEBUG:
                 print(f"\n Final state ground truth / estimate")
                 print(f"(x, y, theta) = ({ds_GroundTruth[-1].x[0]:.3f} m, {ds_GroundTruth[-1].x[1]:.3f} m, {ds_GroundTruth[-1].x[2]:.3f} rad)")
@@ -102,10 +102,10 @@ def main():
 
             # --- PLOTTING ---
             ds_[0].append(UKF_State)
-            labels.append(f"UKF p={p}, q={q}, r={r}, alpha={alpha}")
+            labels.append(f"UKF p:{p:.0E}, q:{q:.0E}, r:{r:.0E}, alpha:{alpha:.0E}")
         
         # --- PLOTTING ---
-        title = f"Robot trajectories, UKF, based on ds{i}_Control.dat and ds{i}_Measurement.dat, p={p}, q={q}, r={r}, alpha={alpha}"
+        title = f"Robot trajectories, UKF, based on ds{i}_Control.dat and ds{i}_Measurement.dat"
         ds_Plot(ds_, title, labels, colors[0:len(labels)])
         plot_errors(ds_[0][0], ds_[0][1:], labels, colors[0:len(labels)])
 
@@ -181,15 +181,14 @@ def resample_data(dt, ds_Control_raw, ds_Measurement_raw, ds_GroundTruth_raw):
     ds_Measurement_raw[:, 0] -= min_time
 
     max_time = ds_GroundTruth_raw[-1, 0]
-    timesteps = int(max_time / dt) + 1
-    t_grid = np.linspace(0, max_time, timesteps)
+    t_grid = np.arange(0, max_time + dt/2, dt)
 
-    ds_Control = np.zeros((timesteps, ds_Control_raw.shape[1]))
+    ds_Control = np.zeros((t_grid.shape[0], ds_Control_raw.shape[1]))
     ds_Control[:, 0] = t_grid
     for i in range(1, ds_Control_raw.shape[1]):
         ds_Control[:, i] = np.interp(t_grid, ds_Control_raw[:, 0], ds_Control_raw[:, i])
 
-    ds_GroundTruth = np.zeros((timesteps, ds_GroundTruth_raw.shape[1]))
+    ds_GroundTruth = np.zeros((t_grid.shape[0], ds_GroundTruth_raw.shape[1]))
     ds_GroundTruth[:, 0] = t_grid
     for i in range(1, ds_GroundTruth_raw.shape[1]):
         ds_GroundTruth[:, i] = np.interp(t_grid, ds_GroundTruth_raw[:, 0], ds_GroundTruth_raw[:, i])
@@ -244,15 +243,6 @@ def dead_reckoning(state_0: "State", ds_Control: list["Control"]):
 def normalize_angle(angle): # shift to ]-pi, pi]
     return (angle + math.pi) % (2 * math.pi) - math.pi 
 
-def motion_model_noise(posterior: "State", prior: "State", control: "Control"):
-
-    mu = 0.5
-    x0_ = 0.5 * (prior.x[0] + posterior.x[0]) + mu * (prior.x[1] - posterior.x[0] )
-    y0_ = 0.5 * (prior.x[1] + posterior.x[1]) + mu * (prior.x[0] - posterior.x[1] )
-    r_ = math.sqrt((x0_ - prior.x[0])**2 + (y0_ - prior.x[1])**2)
-
-    pass # TODO
-
 ### MEASUREMENT MODEL ###
 
 def measurement_model(state: "State", landmark: "Landmark", R=np.zeros((2, 2))):
@@ -293,8 +283,6 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
                 
                 z_mean, Pzz = compute_mean_and_covariance(Z_np, R, weights_mean, weights_cov) # same weights for mean and covariance
 
-                # z_mean = Z_np[0] # cheat mean
-
                 Pyz = compute_cross_covariance(Y_np, y_mean, Z_np, z_mean, weights_cov) # cross covariance
                 K = Pyz @ np.linalg.inv(Pzz) # Kalman gain
                 innovation = measurement.z - z_mean # measurement innovation
@@ -304,6 +292,7 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
                 P = Pyy - K @ Pzz @ K.T
                 posterior = State(control.t, x=x, P=P)
                 posterior.innovation = innovation # store innovation for plotting later
+                posterior.Kinnovation += K @ innovation # store Kalman gain * innovation for plotting later
                 posterior.measurement = measurement # store (last) measurement for plotting later
                 posterior.z_mean = z_mean
 
@@ -315,11 +304,11 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
                     print(f"motion model (x, y, theta): ({y_mean[0]:.4f} m, {y_mean[1]:.4f} m, {y_mean[2]:.4f} rad)")
                     print(f"posterior (x, y, theta):    ({posterior.x[0]:.4f} m, {posterior.x[1]:.4f} m, {posterior.x[2]:.4f} rad)")
                     print(f"Y_np: \n{Y_np}")
-                    # print(f"weights mean and cov: \n{weights_mean}\n{weights_cov}")
-                    # print(f"Pyy: \n{Pyy}")
+                    print(f"weights mean and cov: \n{weights_mean}\n{weights_cov}")
+                    print(f"Pyy: \n{Pyy}")
                     print(f"Z_np: \n{Z_np}")
-                    # print(f"Pzz: \n{Pzz}")
-                    # print(f"weights sum and mean: {np.sum(weights_mean)}\n{weights_mean}")
+                    print(f"Pzz: \n{Pzz}")
+                    print(f"weights sum and mean: {np.sum(weights_mean)}\n{weights_mean}")
                     print(f"landmark id: {landmark.id}")
                     print(f"landmark position                 (x, y): ({landmark.x[0]:.3f} m, {landmark.x[1]:.3f} m)")
                     x,y = get_xy_measurement(State(x=y_mean), measurement)
@@ -392,45 +381,55 @@ def ds_Plot(ds_, title, labels, colors):
     ds_State = ds_[0]
     ds_Landmark_GroundTruth = ds_[1]
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20,10))
-    for ax in (ax1, ax2):
-        for label, state, color in zip(labels, ds_State, colors):
-            plot_state(fig, ax, state, label, color)
+    for label, state, color in zip(labels, ds_State, colors):
+        plot_state(fig, ax1, state, label, color)
+        plot_state_with_uncertainty(fig, ax2, state, label, color)
+    for ax in [ax1, ax2]:
         plot_landmarks(fig, ax, ds_Landmark_GroundTruth)
+        ax.axis('equal')
+        ax.grid(True)
+        ax.set_xlabel('X position (m)')
+        ax.set_ylabel('Y position (m)')
     zoom = 1
     ax2.set_xlim(ds_State[0][0].x[0]-zoom, ds_State[0][0].x[0]+zoom)
     ax2.set_ylim(ds_State[0][0].x[1]-zoom, ds_State[0][0].x[1]+zoom)
+    ax1.legend(loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=len(labels))
     fig.suptitle(title)
 
 def plot_state(fig, ax, ds_State, label, color):
     ''' plot robot trajectory and orientation for one dataset '''
     ds_x = [state.x[0] for state in ds_State]
     ds_y = [state.x[1] for state in ds_State]
-    ds_theta = [state.x[2] for state in ds_State]
-
-    m = 20 # quiver spacing
-    ds_x_q = ds_x[::m]
-    ds_y_q = ds_y[::m]
-    ds_theta_q = ds_theta[::m]
-
-    # ax.scatter(ds_x[0], ds_y[0], marker='x', label=f'Start {label}', color=color)
-    # ax.scatter(ds_x[-1], ds_y[-1], marker='*', label=f'End {label}', color=color)
-
     ax.plot(ds_x, ds_y, label=label, color=color)
-    # ax.quiver(ds_x_q, ds_y_q, np.cos(ds_theta_q), np.sin(ds_theta_q), scale=15, width=0.002, label=f'Orientation {label}', alpha=0.2, color=color)
-    ax.set_xlabel('X position (m)')
-    ax.set_ylabel('Y position (m)')
-    ax.legend()
-    ax.axis('equal')
-    ax.grid(True)
+
+def plot_state_with_uncertainty(fig, ax, ds_State, label, color):
+    ''' plot robot trajectory and orientation with uncertainty for one dataset '''
+    ds_x = [state.x[0] for state in ds_State]
+    ds_y = [state.x[1] for state in ds_State]
+    xerr = [2*math.sqrt(state.P[0,0]) for state in ds_State] # 2*stddev in x direction
+    yerr = [2*math.sqrt(state.P[1,1]) for state in ds_State] # 2*stddev in y direction
+    ds_theta = [state.x[2] for state in ds_State]
+    ax.plot(ds_x, ds_y, label=label, color=color)
+    ax.errorbar(ds_x, ds_y, xerr=xerr, yerr=yerr, alpha=0.2, color=color, elinewidth=1)
+
+    if DEBUG: # add orientations
+        m = 20 # quiver spacing
+        ds_x_q = ds_x[::m]
+        ds_y_q = ds_y[::m]
+        ds_theta_q = ds_theta[::m]
+        ax.scatter(ds_x[0], ds_y[0], marker='x', label=f'Start {label}', color=color)
+        ax.scatter(ds_x[-1], ds_y[-1], marker='*', label=f'End {label}', color=color)
+        ax.quiver(ds_x_q, ds_y_q, np.cos(ds_theta_q), np.sin(ds_theta_q), 
+                  scale=15, width=0.002, label=f'Orientation {label}', alpha=0.2, color=color)
 
 def plot_landmarks(fig, ax, ds_Landmarks):
     ''' plot landmarks'''
     x = [landmark.x[0] for landmark in ds_Landmarks]
     y = [landmark.x[1] for landmark in ds_Landmarks]
-    ax.scatter(x, y, marker='o', color='black', label='Landmarks')
+    ax.scatter(x, y, marker='o', color='black') # label='Landmarks'
     for landmark in ds_Landmarks:
         ax.text(landmark.x[0], landmark.x[1], f'LM{landmark.id}')
-        plot_uncertainty_ellipse(ax, landmark)
+        # plot_uncertainty_ellipse(ax, landmark)
 
 def plot_uncertainty_ellipse(ax, landmark): 
     ''' plot uncertainty ellipse for landmark, 2 times standard deviation '''
@@ -460,72 +459,90 @@ def plot_measurement_predictions(fig, axes, ds_State, ds_Landmark_GroundTruth):
         ax.axis('equal')
         ax.grid(True)
 
-def plot_errors(ds_GroundTruth, States, titles, colors):
+def plot_errors(ds_GroundTruth, list_States, labels, colors):
     ''' plot state errors and innovation for UKF'''
-    plot_state_errors(ds_GroundTruth, States, titles, colors)
-    # plot_innovation(States) 
+    plot_state_errors(ds_GroundTruth, list_States, labels, colors)
+    plot_innovation(list_States, labels, colors)
 
-def plot_state_errors(ds_GroundTruth, States, labels, colors):
+def plot_state_errors(ds_GroundTruth, list_States, labels, colors):
     ''' plot state errors for UKF and optionally dead reckoning '''
-    fig, ax = plt.subplots(3, 2, figsize=(20,10))
+    fig, ax = plt.subplots(3, 3, figsize=(20,10), sharex=True)
     labels_state = ['X position (m)', 'Y position (m)', 'Orientation (rad)']
     labels_error = ['X position error (m)', 'Y position error (m)', 'Orientation error (rad)']
-    T = min(len(ds_GroundTruth), len(States[0]))
+    labels_correction = ['Correction x (m)', 'Correction y (m)', 'Correction theta (rad)']
+
+    if len(list_States) > 1:
+        alpha = 0.6
+    else:
+        alpha = 1.0
+
+    T = min(len(ds_GroundTruth), len(list_States[0]))
     ds_GroundTruth = ds_GroundTruth[0:T]
-    States = [state[0:T] for state in States] # truncate all states to same length
-    UKF_State = States[0]
+    list_States = [states[0:T] for states in list_States] # truncate all states to same length
+    UKF_State = list_States[0]
     t = [UKF_State[i].t for i in range(len(UKF_State))] # time vector
 
     for i in range(3):
         state_gt = [ds_GroundTruth[j].x[i] for j in range(T)]
         ax[i, 0].plot(t, state_gt, label=labels[0], color=colors[0])
 
-        for s, state in enumerate(States): # plot all states
-            state_ = [state[j].x[i] for j in range(T)]
-            ax[i, 0].plot(t, state_, label=labels[s+1], color=colors[s+1])
+        for s, states in enumerate(list_States): # plot all states
+            states_ = [states[j].x[i] for j in range(T)]
+            ax[i, 0].plot(t, states_, label=labels[s+1], color=colors[s+1], alpha=alpha)
 
-            errors = np.array([[state[i].x[j] - ds_GroundTruth[i].x[j] for j in range(3)] for i in range(T)])
+            errors = np.array([[states[i].x[j] - ds_GroundTruth[i].x[j] for j in range(3)] for i in range(T)])
             if i == 2: # normalize angle error
                 errors[:, i] = np.array([normalize_angle(errors[j, i]) for j in range(T)])
-            ax[i, 1].plot(t, errors[:, i], color=colors[s+1])
+            ax[i, 1].plot(t, errors[:, i], label=labels[s+1], color=colors[s+1], alpha=alpha)
+            ax[i, 2].plot([state.t for state in states if state.measurement is not None],
+                           [state.Kinnovation for state in states if state.measurement is not None], 
+                           label=labels[s+1], alpha=alpha, color=colors[s+1])
         
-        ax[i, 0].set_xlabel('Time step')
         ax[i, 0].set_ylabel(labels_state[i])
         ax[i, 0].grid(True)
-        ax[i, 0].legend()
-
-        ax[i, 1].set_xlabel('Time (s)')
         ax[i, 1].set_ylabel(labels_error[i])
         ax[i, 1].grid(True)
-        # ax[i, 1].legend()
+        ax[i, 2].set_ylabel(labels_correction[i])
+        ax[i, 2].grid(True)
 
-    fig.suptitle('UKF State Estimation Errors')
+    ax[2, 0].set_xlabel('Time (s)')
+    ax[2, 1].set_xlabel('Time (s)')
+    ax[2, 2].set_xlabel('Time (s)')
+    ax[0, 0].legend(loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=len(labels))
 
-def plot_innovation(UKF_State):
+def plot_innovation(list_States, labels, colors):
     ''' plot measurement innovations for UKF'''
-    measurements = [state.measurement.z for state in UKF_State if state.measurement is not None] # only plot measurements for landmarks that are estimated
-    predicted_measurements = [state.z_mean for state in UKF_State if state.measurement is not None]
-    t = [state.t for state in UKF_State if state.measurement is not None]
-    fig, ax = plt.subplots(2, 2, figsize=(10,10))
+    fig, ax = plt.subplots(2, 2, figsize=(20,10), sharex=True)
     labels_measurement = ['Range (m)', 'Bearing (rad)']
     labels_error = ['Range innovation (m)', 'Bearing innovation (rad)']
 
+    if len(list_States) > 1:
+        alpha = 0.6
+    else:
+        alpha = 1.0
+
     for i in range(2):
-        ax[i, 0].plot(t, [m[i] for m in measurements],
-                   label=f'Measured {labels_measurement[i]}', linestyle='None', marker='+', markersize=3, alpha=0.5)
-        ax[i, 0].plot(t, [p[i] for p in predicted_measurements],
-                   label=f'Predicted {labels_measurement[i]}', linestyle='None', marker='x', markersize=3, alpha=0.5)
-        ax[i, 0].set_xlabel('Time (s)')
+        for s, states in enumerate(list_States):
+            measurements = [state.measurement.z for state in states if state.measurement is not None]
+            predicted_measurements = [state.z_mean for state in states if state.measurement is not None]
+            t = [state.t for state in states if state.measurement is not None]
+            if s == 0: # only plot ground truth once
+                ax[i, 0].plot(t, [m[i] for m in measurements],
+                        label=labels[0], linestyle='None', marker='+', markersize=3, color=colors[0])
+            ax[i, 0].plot(t, [p[i] for p in predicted_measurements],
+                    label=labels[s+1], linestyle='None', marker='x', markersize=3, color=colors[s+1], alpha=alpha)
+            
+            ax[i, 1].plot(t, [m[i]-p[i] for m, p in zip(measurements, predicted_measurements)], label=labels[s+1], alpha=alpha, color=colors[s+1])
         ax[i, 0].set_ylabel(labels_measurement[i])
         ax[i, 0].grid(True)
-        ax[i, 0].legend()
-
-        ax[i, 1].plot(t, [m[i]-p[i] for m, p in zip(measurements, predicted_measurements)], label=labels_error[i])
-        ax[i, 1].set_xlabel('Time (s)')
         ax[i, 1].set_ylabel(labels_error[i])
         ax[i, 1].grid(True)
-        ax[i, 1].legend()
-    fig.suptitle('UKF Measurement Innovations')
+
+    ax[1, 0].set_xlabel('Time (s)')
+    ax[1, 1].set_xlabel('Time (s)')
+    ax[0, 0].legend(loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=len(labels))
+    # ax[0, 1].legend(loc='lower center', bbox_to_anchor=(0.5, 1.01))
+    fig.suptitle('Measurements & Innovations')
 
 ### DATA STRUCTURES ###
 
@@ -536,6 +553,7 @@ class State:
         self.x = np.array(x) if x is not None else np.zeros(3) # state (x, y, theta) at t (posterior)
         self.P = P if P is not None else np.zeros((3, 3)) # covariance matrix at t
         self.innovation = None
+        self.Kinnovation = np.zeros(3)
         self.measurement = None
         self.z_mean = None
 
