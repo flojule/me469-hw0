@@ -1,7 +1,6 @@
 import numpy as np
 import math
 import matplotlib.pyplot as plt
-import itertools
 
 def main():
     global DEBUG
@@ -10,6 +9,7 @@ def main():
     i = 0 # dataset index
     partA = False
     partB = True
+    DR = False # add dead reckoning to UKF plot
 
     export = False # export resampled data files
     use_resampled = True # use resampled data files
@@ -21,7 +21,7 @@ def main():
         i = str(i) + "_RS"
         
     ds_Control, ds_GroundTruth, ds_Landmark_GroundTruth, ds_Measurement = import_data(i, dt=dt, export=export)
-    colors = ["Blue", "Green", "Red", "Orange", "Pink", "Brown", "Purple", "Gray", "Cyan", "Magenta"] # for plotting multiple datasets
+    colors = ["Blue", "Green", "Orange", "Cyan", "Pink", "Brown", "Purple", "Gray", "Red", "Magenta"] # for plotting multiple datasets
     
     if DEBUG:
         k = 2000 # reduce size for testing
@@ -69,24 +69,23 @@ def main():
 
     # ------------- Part B -------------
     if partB:
-        p_ = [1e-8] # initial covariance                    1e-4 --- 1e-3<p<1e-8
-        q_ = [1e-8, 1e-8] # process noise covariance        1e-10 --- 1e-5<q<e-10
-        r_ = [1e-4, 1e-5] # measurement noise covariance    1e-5 --- 1e-2<r<e-6
-        alpha_ = [0.1, 0.1] # UKF parameter                      0.6  --- 0.1<alpha<1.0
+        # q9: parameter exploration
+        p_ = [1e-6, 1e-6] # initial covariance                    1e-8 --- 1e-3<p<1e-8
+        q_ = [1e-6, 1e-6] # process noise covariance        1e-8 --- 1e-5<q<e-10
+        r_ = [1e-2, 5e-2] # measurement noise covariance    1e-4 --- 1e-2<r<e-6
+        alpha_ = [0.1] # UKF parameter                      0.6  --- 0.1<alpha<1.0
+        state_0 = ds_GroundTruth[0] # initial state from ground truth
+        kappa, beta = 0.0, 2.0
         ds_ = [[ds_GroundTruth], ds_Landmark_GroundTruth] # add list of trial states to this list
         labels = ["Ground truth"]
 
-        for (p, q, r, alpha) in zip(p_, q_, r_, alpha_): # grid search over parameters itertools.product
-            # --- UKF parameters ---
-            state_0 = ds_GroundTruth[0] # initial state from ground truth
-            kappa, beta = 0.0, 2.0
-
+        for (p, q, r, alpha) in zip(p_, q_, r_, alpha_): # grid search over parameters
             state_0.P = np.diag([p, p, p]) # initial covariance
             Q = np.diag([q, q, q]) # process noise covariance
             R = np.diag([r, r]) # measurement noise covariance
             weights_mean, weights_cov = compute_weights(3, alpha, kappa, beta) # n=3 for (x, y, theta)
 
-            # --- UKF loop ---
+            # q7 --- UKF loop ---
             UKF_State = []
             UKF_State.append(state_0)
             for control in ds_Control: # first measurement happens at t=11.12, step 557
@@ -103,9 +102,14 @@ def main():
             # --- PLOTTING ---
             ds_[0].append(UKF_State)
             labels.append(f"UKF p:{p:.0E}, q:{q:.0E}, r:{r:.0E}, alpha:{alpha:.0E}")
-        
+        # q8
+        if DR:
+            DR_State = dead_reckoning(ds_GroundTruth[0], ds_Control)
+            ds_[0].append(DR_State)
+            labels.append("Dead reckoning")
+
         # --- PLOTTING ---
-        title = f"Robot trajectories, UKF, based on ds{i}_Control.dat and ds{i}_Measurement.dat"
+        title = f"Robot trajectories based on ds{i}_Control.dat and ds{i}_Measurement.dat"
         ds_Plot(ds_, title, labels, colors[0:len(labels)])
         plot_errors(ds_[0][0], ds_[0][1:], labels, colors[0:len(labels)])
 
@@ -429,15 +433,6 @@ def plot_landmarks(fig, ax, ds_Landmarks):
     ax.scatter(x, y, marker='o', color='black') # label='Landmarks'
     for landmark in ds_Landmarks:
         ax.text(landmark.x[0], landmark.x[1], f'LM{landmark.id}')
-        # plot_uncertainty_ellipse(ax, landmark)
-
-def plot_uncertainty_ellipse(ax, landmark): 
-    ''' plot uncertainty ellipse for landmark, 2 times standard deviation '''
-    from matplotlib.patches import Ellipse
-    ellipse = Ellipse(xy=(landmark.x[0], landmark.x[1]),
-                        width=2*landmark.stddev[0], height=2*landmark.stddev[1],
-                        edgecolor='blue', fc='None', lw=1, label='Uncertainty')
-    ax.add_patch(ellipse)
 
 def plot_measurement_predictions(fig, axes, ds_State, ds_Landmark_GroundTruth):
     ''' plot landmark measurements predictions '''
@@ -464,8 +459,8 @@ def plot_errors(ds_GroundTruth, list_States, labels, colors):
     plot_state_errors(ds_GroundTruth, list_States, labels, colors)
     plot_innovation(list_States, labels, colors)
 
-def plot_state_errors(ds_GroundTruth, list_States, labels, colors):
-    ''' plot state errors for UKF and optionally dead reckoning '''
+def plot_state_errors(ds_GroundTruth, list_States, labels, colors): 
+    ''' plot state, state error and correction (K*innovation) for a given list of states '''
     fig, ax = plt.subplots(3, 3, figsize=(20,10), sharex=True)
     labels_state = ['X position (m)', 'Y position (m)', 'Orientation (rad)']
     labels_error = ['X position error (m)', 'Y position error (m)', 'Orientation error (rad)']
@@ -495,7 +490,7 @@ def plot_state_errors(ds_GroundTruth, list_States, labels, colors):
                 errors[:, i] = np.array([normalize_angle(errors[j, i]) for j in range(T)])
             ax[i, 1].plot(t, errors[:, i], label=labels[s+1], color=colors[s+1], alpha=alpha)
             ax[i, 2].plot([state.t for state in states if state.measurement is not None],
-                           [state.Kinnovation for state in states if state.measurement is not None], 
+                           [state.Kinnovation[i] for state in states if state.measurement is not None], 
                            label=labels[s+1], alpha=alpha, color=colors[s+1])
         
         ax[i, 0].set_ylabel(labels_state[i])
