@@ -70,9 +70,9 @@ def main():
     # ------------- Part B -------------
     if partB:
         # q9: parameter exploration
-        p_ = [1e-6, 1e-6] # initial covariance                    1e-8 --- 1e-3<p<1e-8
-        q_ = [1e-6, 1e-6] # process noise covariance        1e-8 --- 1e-5<q<e-10
-        r_ = [1e-2, 5e-2] # measurement noise covariance    1e-4 --- 1e-2<r<e-6
+        p_ = [1e-6, 1e-6, 1e-6] # initial covariance                    1e-8 --- 1e-3<p<1e-8
+        q_ = [1e-6, 1e-4, 1e-8] # process noise covariance        1e-8 --- 1e-5<q<e-10
+        r_ = [1e-2, 5e-2, 5e-2] # measurement noise covariance    1e-4 --- 1e-2<r<e-6
         alpha_ = [0.1] # UKF parameter                      0.6  --- 0.1<alpha<1.0
         state_0 = ds_GroundTruth[0] # initial state from ground truth
         kappa, beta = 0.0, 2.0
@@ -414,7 +414,7 @@ def plot_state_with_uncertainty(fig, ax, ds_State, label, color):
     yerr = [2*math.sqrt(state.P[1,1]) for state in ds_State] # 2*stddev in y direction
     ds_theta = [state.x[2] for state in ds_State]
     ax.plot(ds_x, ds_y, label=label, color=color)
-    ax.errorbar(ds_x, ds_y, xerr=xerr, yerr=yerr, alpha=0.2, color=color, elinewidth=1)
+    ax.errorbar(ds_x, ds_y, xerr=xerr, yerr=yerr, alpha=0.1, color=color, elinewidth=1)
 
     if DEBUG: # add orientations
         m = 20 # quiver spacing
