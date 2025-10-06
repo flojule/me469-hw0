@@ -22,7 +22,7 @@ def main():
         
     ds_Control, ds_GroundTruth, ds_Landmark_GroundTruth, ds_Measurement = import_data(i, dt=dt, export=export)
     colors = ["Blue", "Green", "Orange", "Cyan", "Pink", "Brown", "Purple", "Gray", "Red", "Magenta"] # for plotting multiple datasets
-    
+
     if DEBUG:
         k = 2000 # reduce size for testing
         ds_Control = ds_Control[0:k]
@@ -72,13 +72,19 @@ def main():
 
     # ------------- Part B -------------
     if partB:
+
         # q9: parameter exploration
 
         # ----- Noise parameters -----
         p_ = [1e-6, 1e-6, 1e-6] # initial covariance                    1e-8 --- 1e-3<p<1e-8
         q_ = [1e-6, 1e-6, 1e-6] # process noise covariance        1e-8 --- 1e-5<q<e-10
         r_ = [1e-2, 5e-1, 5e-3] # measurement noise covariance    1e-4 --- 1e-2<r<e-6
-        
+        P_0 = np.diag([1e-6, 1e-6, 1e-6]) # initial covariance
+        Q_0 = np.diag([1e-6, 1e-6, 3.6e-5]) # process noise covariance
+        R_0 = np.diag([1e-2, 1e-2]) # measurement noise covariance
+        P_ = [P_0, P_0, P_0]
+        Q_ = [Q_0, Q_0, Q_0]
+        R_ = [R_0, R_0*1e-2, R_0*1e2]
         # ----- UKF parameters -----
         alpha_ = [0.1, 0.1, 0.1]
         kappa, beta = 0.0, 2.0
@@ -98,10 +104,8 @@ def main():
         ds_Predicted = [] # add list of predicted states to this list
         labels = ["Ground truth"] # add labels with UKF ID to this list
 
-        for (p, q, r, alpha, state_0) in zip(p_, q_, r_, alpha_, state_0_): # grid search over parameters
-            state_0.P = np.diag([p, p, p]) # initial covariance
-            Q = np.diag([q, q, q]) # process noise covariance
-            R = np.diag([r, r]) # measurement noise covariance
+        for (P, Q, R, alpha, state_0) in zip(P_, Q_, R_, alpha_, state_0_): # grid search over parameters
+            state_0.P = P
             weights_mean, weights_cov = compute_weights(3, alpha, kappa, beta) # n=3 for (x, y, theta)
 
             # q7 --- UKF loop ---
@@ -241,7 +245,7 @@ def get_robot_id(ds_Measurement, ds_Barcodes):
 
 ### MOTION MODEL ###
 
-def motion_model(prior: "State", control: "Control", Q=np.zeros((3, 3))): 
+def motion_model(prior: "State", control: "Control"): 
     ''' computes next state given a prior state and a control input '''
     x = np.zeros(prior.x.shape)
     if control.omega == 0:
@@ -271,7 +275,7 @@ def normalize_angle(angle): # shift to ]-pi, pi]
 
 ### MEASUREMENT MODEL ###
 
-def measurement_model(state: "State", landmark: "Landmark", R=np.zeros((2, 2))):
+def measurement_model(state: "State", landmark: "Landmark"):
     ''' range and bearing measurement model, given a state and a landmark '''
     range = math.sqrt((landmark.x[0] - state.x[0])**2 + (landmark.x[1] - state.x[1])**2)
     bearing = math.atan2(landmark.x[1] - state.x[1], landmark.x[0] - state.x[0]) - state.x[2]

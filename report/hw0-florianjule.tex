@@ -12,6 +12,7 @@
 \usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage[colorlinks=true, allcolors=blue]{hyperref}
+\providecommand{\e}[1]{\ensuremath{\times 10^{#1}}}
 
 \graphicspath{ {figures/} }
 
@@ -21,64 +22,78 @@
 \begin{document}
 \maketitle
 
-\section{Part A}
-\subsection{Motion model}
-The motion model needs a starting position: $(x_0, y_0, \theta_0)$. 
-Its inputs are: the prior position and orientation: $(x_{t-1}, y_{t-1}, \theta_{t-1})$, the controls input at time $t$, translational and rotational speeds, $(\nu,\omega)$. 
-Its outputs are: posterior estimations of the positions and orientation $(x, y, \theta)$.
+\large{Part A}
+\normalsize{}
+
+\section{Motion model}
+
+The motion model inputs are: the prior position and orientation: $(x_{t-1}, y_{t-1}, \theta_{t-1})$, the controls input at time $t$, translational and rotational speeds, $(\nu,\omega)$. 
+Its outputs are: the posterior estimations of the positions and orientation $(x, y, \theta)$.
+
+We can set a starting position: $(x_0, y_0, \theta_0)$ as a parameter.
+
+This motion model will be used in a UKF. With the UKF, the sigma points will play the role of the state uncertainty, we do not need to introduce additional noise at this stage as we would with other filters.
+
+The robot is assumed to move on a plane, with a given translational and rotational speed over a time step $t$. The robot moves along an arc of circle if $\omega \neq 0$ or in a straight line if $\omega=0$. Below is the derivation of the motion model equations.
+
 
 Motion model math:
 % add plot
 
-Depending on the type of filter used, noise might need to be introduced at this step which requires to define the process noise covariance. With the UKF, the sigma points will play this role, we do not need to introduce additional noise at this stage.
 
 
-The model is non linear. The terms $1/\omega, \cos(\theta+\omega t), \sin(\theta+\omega t)$ make it non linear. The  condition where $\omega=0$ is linear.
-We will this model simple and not try to factor assumptions about the robot and the possible wheel slip
-% reference research on wheel slip motion model and assumptions / parameters.
-A shortcoming of this model comes from its discrete nature and the lack of knowledge about the control system, power units and drivetrain. We assume the speed to be a step function whereas it should be continuous (no infinite acceleration).
 
-\subsection{Motion model test on example commands}
-The provided sequence of commands has separate translational and rotational speeds. The robot moves in a successions of straight lines (step 1, 3, 5).
-Parameters:
-The behavior is as expected.
+This motion model is non linear. The terms $1/\omega, \cos(\theta+\omega t), \sin(\theta+\omega t)$ make it non linear. The  condition where $\omega=0$ is linear.
+
+\section{Motion model test on example commands}
+The provided sequence of commands has separate translational and rotational speeds. The robot moves in a successions of straight lines (step 1, 3, 5). The initial state is set to $(0,0,0)$.
 
 \begin{figure}
 \centering
-\includegraphics[width=\textwidth]{Figure_1.png}
+\includegraphics[scale=0.3]{Figure_1.png}
 \caption{Robot motion model test on example commands}
+\label{fig:figure1}
 \end{figure}
 
-\subsection{Motion model test on robot dataset}
-The starting point of the dead-reckoned path uses the ground truth for its initial state. We can observe a growing drift that is only additive. The trajectory loosely tracks for a couple turns until it completely diverges.
-% find where divergence starts and why
-% show error plot
+\section{Motion model test on robot dataset}
+The starting point of the dead-reckoned path uses the ground truth for its initial state. We can observe from \ref{fig:figure2} that the robot is not following the ground truth. The trajectory loosely tracks until it completely diverges after a few turns, every turn introducing more error. We can observe from \ref{fig:figure3} that the robot's position error accumulates over time. After $t=100$, we can see that the y position diverges. For the remainder of the trajectory we can observe an offset between the orientations, that keeps growing over time.
+A number of factors can explain this behavior:
+\begin{itemize}
+      \item The motion model is simple (does not take into account wheel slip for example).
+      \item The geometry of the robot could be slightly different from the assumed one (the wheel base has an impact on a differencial drive robot).
+      \item The controls could be noisy.
+      \item The power unit and drivetrain can have limitations (power limits, acceleration limits).
+      \item We assume the speed to be a step function whereas it should be continuous (no infinite acceleration).
+
+\end{itemize}
 
 \begin{figure}
 \centering
-\includegraphics[width=\textwidth]{Figure_2.png}
+\includegraphics[scale=0.3]{Figure_2.png}
 \caption{Robot dead reckoning, compared to ground truth}
+\label{fig:figure2}
 \end{figure}
 
 \begin{figure}
 \centering
 \includegraphics[width=\textwidth]{Figure_3.png}
-\caption{Robot position and error}
+\caption{Robot position and error}4
+\label{fig:figure3}
 \end{figure}
 
-\subsection{Unscented Kalman Filter}
+\section{Unscented Kalman Filter}
 
-An unscented Kalman filter (UKF) is fundamentally identical to a Kalman filter, in that unfolds in two steps. The first step is the prediction: it estimates a posterior belief by means of a motion model based on prior state and a control command applied over a time step. The second step is the correction: it uses a measurement model to create an expected measurement of that posterior belief. This is then compared to the actual measurement, and the posterior belief is adjusted based on the difference between expected and actual measurement. Some knowledge of the uncertainty of both model is required for this correction step.
+An unscented Kalman filter (UKF) is in concept similar to a Kalman filter, in that unfolds in two steps. The first step is the prediction: it estimates a posterior belief by means of a motion model based on prior state and a control command applied over a time step. The second step is the correction: it uses a measurement model to create an expected measurement of that posterior belief. This is then compared to the actual measurement, and the posterior belief is adjusted based on the difference between expected and actual measurement. Some knowledge of the uncertainty of both model is required for this correction step.
 
 The UKF is different in that it is meant for non-linear models, where the state uncertainty probabilistic parametrisation (gaussian) is not conserved through the model. Instead, the uncertainty is propagated by evaluating sample points (sigma points) through the motion model, and a mean belief and associated covariance is recreated from those points. New sigma points are generated to pass through the measurement model and a mean measurement and associated covariance are constructed. 
 % add sigma point math
 The remaining algebraic operations are performed on those means (posterior belief and measurement belief).
-% Add matric math here
+% Add matrice math here
 
 
-\subsection{Measurement model}
+\section{Measurement model}
 
-The measurement model takes the predicted belief $(x, y, \theta)$ as input as well as knowledge about the space, in this case the measured (assumed true) positions of the landmarks (those are available via the Landmark Groundtruth file).
+The measurement model takes the predicted belief $(x, y, \theta)$ as inputs, as well as knowledge about the space, in this case the measured (assumed true) positions of the landmarks (those are available via the Landmark Groundtruth file).
 The model outputs an estimated measurement range and bearing.
 
 The derivation of the measurement model is as follows:
@@ -87,80 +102,70 @@ The derivation of the measurement model is as follows:
 The measurement data reads landmark barcodes. Those need to be converted to the subject number between 6 and 20 so that they can be paired with the ground truth landmark data. This is done using the barcodes file.
 
 
-\subsection{Test of measurement model on robot data}
-The measurement model contains no noise and the positions provided are assumed to be the known robot position. The measurement model successfully finds all landmarks with zero error.
+\section{Test of measurement model on robot data}
+The measurement model does not add noise and the positions provided are assumed to be the known robot position. The measurement model successfully finds all landmarks with zero error.
+
+\vspace{1cm}
+\large{Part B}
+\normalsize{}
+
+\section{Filter implementation}
+
+In order for the filter to be implemented on this dataset, some attention needs to be paid to synchronize the data. The controls and the measurements are on different time grids. We interpolate the controls data over a fixed timestep chosen to be 0.05s. This timestep can be updated but seems to have little effects on the overall behavior. The measurements are grouped to the nearest timestep. Because of the lower accuracy of those measurement, this will prove acceptable.
+
+Special attention also needs to be paid when working with angles. Anytime an angle is manipulated, we will normalize it between $]-\pi,\pi]$. We will use the circular mean for means calculations \cite{wiki:circular_mean}.
 
 
-\section{Part B}
-\subsection{Filter implementation}
-
-In order for the filter to be implemented on this dataset, some attention needs to be paid to synchronize the data. The controls and the measurements are on different time grids. We interpolate the controls data over a fixed timestep chosen to be 0.05. This timestep can be updated but seems to have little effects on the overall behavior. The measurements are grounped to the nearest timestep. Because of the lower accuracy of those measurement, this will prove acceptable.
-
-Special attention also needs to be paid when working with angle. Anytime an angle is manipulated, we will normalize it between $]-\pi,\pi]$ and we will use the circular mean to compute means.
-% add ref to wiki
+\section{Comparison to dead reckoning}
+Let us look at the data and try to undestand the order of magnitude of the covariance matrices.
+Looking at the control data set (resampled at 0.05s intervals), the we find $\nu<0.1m/s$ and $\omega<0.6rad/s$. This means the upper bound a state will evolve after a timestep is $0.005m$ and $0.03rad$. We expect the motion model to be reasonably accurate, we will make an assumption that it is at least 80\% accurate. This means our process noise covariance matrix will have for diagonal elements $\sigma_x^2=\sigma_y^2=(0.005/5)^2=10^{-6},\sigma_\theta^2=(0.03/5)^2=3.6\e{-5}$). We have no data on the measurements accuracy or the robot sensor. It is likely that the measurements are noisy, orders of magnitude higher than the process noise covariance. We will explore this further below when tuning the parameters. For now, we will assume a starting point of $\sigma_{range}^2=0.1^2=10^{-2}, \sigma_{bearing}^2=(6*3.14/180)^2=10^{-2}$.
 
 
-\subsection{Comparison to dead reckoning}
-The commands from step 2 lead to similar results for both model, if the process noise covariance has a high impact on the motion model.
-Let us looks at the data and try to undestand the order of magnitude of the covariance matrices.
-Looking at the control data set (resampled at 0.05s intervals), the we find $\nu<0.1m/s$ and $\omega<0.6rad/s$. This means the order of magnitude of the state will evolve after a timestep is ($0.005m$ and $0.03rad$). If the standard deviation is of that magnitude, (covariance $\sigma_x=\sigma_y=0.00025,\sigma_\theta=0.001$), we can expect significan noise and non realistic posterior updates. 
-We don't expect the motion model to be an order of magnitude off, it is reasonable to set the process noise covariance matrix an order of magnitude below.
-We have no data on the measurements accuracy or the robot sensor.
-
-% review values for example
-We will assume moving forward that the process noise covariance is set to appropriate values as explained above (and more will be discussed below when reviewing parameter tuning).
-Now looking at the robot dataset, we can find that the first measurement is collected at $t=11.100s$. Until then, both model match (prediction step only, no correction).
-% observations prior to DR diverging
-% drift triggered by event
+Now looking at the robot dataset, we can find that the first measurement is collected at $t=11.100s$. Until then, the filter is not providing any correction and the trajectory matches the dead-reckoned path.
+However, once the first measurement is collected, the filter starts correcting the trajectory. We can observe from figure 4 that the UKF trajectory mostly tracks the ground truth.
 
 \begin{figure}
 \centering
-\includegraphics[width=\textwidth]{Figure_4.png}
-\caption{Robot trajectory predictions with and without UKF}
+\includegraphics[scale=0.3]{Figure_4.png}
+\caption{Robot trajectory predictions with and without UKF. The figure on the right shows the 95 percent confidence interval on position for the UKF trajectory.}
 \end{figure}
 
 
 \begin{figure}
 \centering
 \includegraphics[width=\textwidth]{Figure_5.png}
-\caption{Robot states and errors}
+\caption{Robot states and errors (UKF vs dead reckoning)}
 \end{figure}
 
-\subsection{Filter analysis}
-We will in this section perform an exploration of the different filter parameters.
-The following assumptions have been made for simplicity:
-- x and y have the same covariances. 
-- $\theta$ covariance
-- range and bearing
-- the covariance matrices is diagonal, i.e. independence of the different state/measurement variables. 
-- the initial state and its covariance, we use the ground truth to set the robot position. A very small initial state covariance makes sense. We will later look at this assumption and whether offseting the starting position impacts the model.
+\section{Filter analysis}
+We will in this section perform an exploration of the different filter parameters. We need to be paying attention to the following parameters:
+\begin{itemize}
+      \item Initial state and its covariance
+      \item Process noise covariance
+      \item Measurement noise covariance
+      \item Alpha
+\end{itemize}
 
-We have limited data available on the robot and its controls and sensors, the different covariance matrices (initial state covariance, process noise covariance and measurement noise covariance) have been assumed as diagonal elements of equal variances. An exploration in search of finding optimal parameters and understanding plausible assumptions is shown below. 
-% review noise assumptions
+We have limited data available on the robot and its controls and sensors, the different covariance matrices (initial state covariance, process noise covariance and measurement noise covariance) have been assumed as diagonal matrices with no inter-dependencies.
 
 
-\subsubsection{Process and measurement noise covariance}
-Setting the process and measurement noise covariance is an iterative process. There is limited knowledge on the sensors being used on the robot. The motion model seems reasonable for short timesteps, especially if no differencial is applied from the controls (motion in straight line). We can get an idea of the standard deviation by looking at the dead reckoning model and estimating the drift over time.
-% add plot drift between t=0-20
-A starting point of $q=1e-6$ seems reasonable.
-An estimation of the measurement noise covariance can be estalish iteratively. We will try $r=[1e-2, 1e-4, 1e-6, 1e-8]$.
-The difference between the noise covariance matrices has a strong impact on the result. A smaller process noise covariance compared to the measurement one means that the posterior is more heavily influenced by the prediction step than the correction step (small Kalman gain * innovation). And vice versa.
+\subsection{Process and measurement noise covariance}
+With the process noise covariance matrix set to what is believed to be a reasonable value based on the motion model, we can start our exploration on the measurement noise covariance. There is limited knowledge on the sensors being used on the robot.
+An estimation of the measurement noise covariance can be estalish iteratively. We will try multiples (1, 0.1, 0.01, 10) of our earlier guess $\sigma_{range}^2=10^{-2}, \sigma_{bearing}^2=10^{-2}$. The plot in \ref{fig:figure6} shows the trajectory predictions for different noise parameters. The plots in \ref{fig:figure7} and \ref{fig:figure8} show the states, errors, predicted measurements and innovations for the different noise parameters. The 95\% confidence interval is shown (defined as +/-2*stddev), to get an idea of the uncertainty of the predictions.
+
+We find, as reported in \ref{fig:figure7} and \ref{fig:figure8}, that the measurement noise covariance has a strong impact on the behavior of the filter. The Kalman gain, which controls how much the posterior is corrected based on the innovation (difference between expected and actual measurement) is directly linked to the ratio between process noise covariance and measurement noise covariance. A higher noise covariance means more uncertainty, and less confidence in the model. The Kalman gain will be higher, and the posterior will be corrected more heavily based on the innovation (and vice versa).
 
 A measurement noise covariance of 5 or more order of magnitude higher than the process noise covariance essentially leads the model to ignore the measurements and leaves the robot dead reckoning.
-% plot dead reckoning and high r
 
-A measurement noise covariance of the same magnitude as the process noise covariance leads to high overcorrection and very noisy posterior predictions: the position never stabilizes and drifts away from the ground truth. The state is updated with an equivalent control*dt that shows displacement beyond what can be expected reasonable (>10x expected motion).
-% plot low r, show dt*control equivalent
+A measurement noise covariance of the same magnitude as the process noise covariance leads to high overcorrection and very noisy posterior predictions: the position never stabilizes and drifts away from the ground truth. The state is updated with an equivalent control*dt that shows displacement beyond what can be expected reasonable (>2x expected motion).
 
-It seems that a difference in order of magnitude of 4 leads to appreciable results. One can observe that shifting both the noise covariance higher or lower in pairs has little impact on the trajectory.
-% plot shifting both in pairs
-
-Plotting for process noise and measurement noise matched in pairs and offset by 4 orders of magnitude, one gets close to identical results (error within e-4 meters or 0.1mm). 4 OeM seems to lead to the smoothest trajectory (not over correcting) while minimizing error.
+It seems that a difference in order of magnitude of 4 leads to appreciable results, which is actually consistent with the initial guess. This leads to the smoothest (not over-corrected) and most accurate trajectory. Additionally, one can observe that shifting both the noise covariance higher or lower in pairs has little impact on the trajectory.
 
 \begin{figure}
 \centering
 \includegraphics[width=\textwidth]{Figure_6.png}
 \caption{Robot trajectory predictions for different UKF noise parameters. The 95 percent confidence interval on position is shown on the right figure.}
+\label{fig:figure6}
 \end{figure}
 
 
@@ -168,44 +173,42 @@ Plotting for process noise and measurement noise matched in pairs and offset by 
 \centering
 \includegraphics[width=\textwidth]{Figure_7.png}
 \caption{Robot states and errors for different UKF noise parameters}
+\label{fig:figure7}
 \end{figure}
 
 \begin{figure}
 \centering
 \includegraphics[width=\textwidth]{Figure_8.png}
 \caption{Robot predicted measurements and innovations for different UKF noise parameters}
+\label{fig:figure8}
 \end{figure}
 
-\subsubsection{Initial state and its covariance}
-For a known starting point, the initial state covariance has little to no impact.An initial covariance set fairly high (1e-1) will generate noise, this will however not last and the model corrects this behavior after a few seconds and all estimations become in agreement with one another.
+\subsection{Initial state and its covariance}
+For a known starting point, the initial state covariance has little to no impact. An initial covariance set fairly high (1e-1) will generate noise, this will however not last and the model corrects this behavior after a few seconds and all estimations become in agreement with one another.
 % show plot with different initial cov
 % move initial point and check impact on model
 
-\subsubsection{Alpha}
-Alpha controls the spread to the mean when creating the sigma points. After iteratiing for $\alpha=[0.01, 0.1, 1]$, it does not seem to have much of an impact on the behavior of the filter. This gives confidence in the capacity of the sigma points in capturing the non-linear behavior and the assumption about the state estimation as a gaussian.
+\subsection{Alpha}
+Alpha controls the spread to the mean when creating the sigma points. After iteratiing for $\alpha=[0.01, 0.1, 1]$, it does not seem to have much of an impact on the behavior of the filter. This gives confidence in the capacity of the sigma points in capturing the non-linear behavior and the assumption about the state estimation as a gaussian (we have a single target / we do not expect a multi modal distribution).
 
-\subsubsection{Missed measurement}
+\subsection{Missed measurement}
 % find in data longest range with no measurement
 
-\subsubsection{Multiple measurements}
+\subsection{Multiple measurements}
 % find litterature that suggest sequential correction (instead of weighted average)
 If several measurements are found for a given time step, the correction step loops over the measurements one by one, using the corrected posterior as the new input for the next measurement.
 
-\subsubsection{Final considerations}
-A reminder in probability: the 95% confidence interval is given by +/-2*stddev, and the 99% confidence interface is given by +/-3*stddev.
-The following parameters are eventually chosen:
-$p=1e-6$ initial position.
-$q=1e-6 (stddev=\sqrt(q)=0.001m or 1mm / 0.001rad or 0.06degrees)$ is a reasonable error assumption for a command over small dt (0.05s). 
-$r=1e-2 (stddev=sqrt(r)=0.1m or 100mm / 0.1rad or 6degress)$ is a large but plausible error for the measurements.
-$\alpha=0.1$ Alpha has been found to have little impact on this model and dataset. 
+\subsection{Final considerations}
+
+The initial guess on the process and measurement noise covariance seems to be fairly accurate and no other combination of parameters seems to lead to better results. 
 
 
-\subsection{How to write Mathematics}
+% \section{How to write Mathematics}
 
-\LaTeX{} is great at typesetting mathematics. Let $X_1, X_2, \ldots, X_n$ be a sequence of independent and identically distributed random variables with $\text{E}[X_i] = \mu$ and $\text{Var}[X_i] = \sigma^2 < \infty$, and let
-\[S_n = \frac{X_1 + X_2 + \cdots + X_n}{n}
-      = \frac{1}{n}\sum_{i}^{n} X_i\]
-denote their mean. Then as $n$ approaches infinity, the random variables $\sqrt{n}(S_n - \mu)$ converge in distribution to a normal $\mathcal{N}(0, \sigma^2)$.
+% \LaTeX{} is great at typesetting mathematics. Let $X_1, X_2, \ldots, X_n$ be a sequence of independent and identically distributed random variables with $\text{E}[X_i] = \mu$ and $\text{Var}[X_i] = \sigma^2 < \infty$, and let
+% \[S_n = \frac{X_1 + X_2 + \cdots + X_n}{n}
+%       = \frac{1}{n}\sum_{i}^{n} X_i\]
+% denote their mean. Then as $n$ approaches infinity, the random variables $\sqrt{n}(S_n - \mu)$ converge in distribution to a normal $\mathcal{N}(0, \sigma^2)$.
 
 
 % \bibliographystyle{alpha}
