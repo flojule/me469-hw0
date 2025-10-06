@@ -9,10 +9,9 @@ def main():
     i = 0 # dataset index
     partA = True
     partB = True
-    DR = True # add dead reckoning to UKF plot
 
     export = False # export resampled data files
-    use_resampled = True # use resampled data files
+    use_resampled = False # use resampled data files
     dt = 1/20 # resampling timestep
 
     if use_resampled:
@@ -76,30 +75,34 @@ def main():
         # q9: parameter exploration
 
         # ----- Noise parameters -----
-        p_ = [1e-6, 1e-6, 1e-6] # initial covariance                    1e-8 --- 1e-3<p<1e-8
-        q_ = [1e-6, 1e-6, 1e-6] # process noise covariance        1e-8 --- 1e-5<q<e-10
-        r_ = [1e-2, 5e-1, 5e-3] # measurement noise covariance    1e-4 --- 1e-2<r<e-6
         P_0 = np.diag([1e-6, 1e-6, 1e-6]) # initial covariance
         Q_0 = np.diag([1e-6, 1e-6, 3.6e-5]) # process noise covariance
         R_0 = np.diag([1e-2, 1e-2]) # measurement noise covariance
+        # P_ = [P_0, P_0*1e2, P_0*1e4]
         P_ = [P_0, P_0, P_0]
+        # Q_ = [Q_0, Q_0*1e-2, Q_0*1e2]
         Q_ = [Q_0, Q_0, Q_0]
         R_ = [R_0, R_0*1e-2, R_0*1e2]
+        # R_ = [R_0, R_0, R_0]
         # ----- UKF parameters -----
-        alpha_ = [0.1, 0.1, 0.1]
+        alpha_ = [0.1, 0.1, 0.1] # spread of sigma points
         kappa, beta = 0.0, 2.0
 
         # ----- Starting point assumptions -----
-        state_00 = ds_GroundTruth[0]
-        # stddev_01x0 = p_[1]**0.5
-        # stddev_01x1 = stddev_01x0
-        # stddev_01x2 = stddev_01x0
-        # state_01 = State(state_00.x[0] + stddev_01x0, state_00.x[0] + stddev_01x1, state_00.x[2] + stddev_01x2)
-        # stddev_02x0 = p_[2]**0.5
-        # stddev_02x1 = stddev_02x0
-        # stddev_02x2 = stddev_02x0
-        # state_02 = State(state_00.x[0] + stddev_02x0, state_00.x[0] + stddev_02x1, state_00.x[2] + stddev_02x2)
-        state_0_ = [state_00, state_00, state_00] # initial state from ground truth, add noise
+        state_00 = ds_GroundTruth[0] # initial state from ground truth, add noise
+        stddev_01x0 = P_[1][0,0]**0.5
+        stddev_01x1 = P_[1][1,1]**0.5
+        stddev_01x2 = P_[1][2,2]**0.5
+        state_01 = State(x=[state_00.x[0] + stddev_01x0, 
+                            state_00.x[1] + stddev_01x1, 
+                            normalize_angle(state_00.x[2] + stddev_01x2)])
+        stddev_02x0 = P_[2][0,0]**0.5
+        stddev_02x1 = P_[2][1,1]**0.5
+        stddev_02x2 = P_[2][2,2]**0.5
+        state_02 = State(x=[state_00.x[0] + stddev_02x0, 
+                            state_00.x[1] + stddev_02x1, 
+                            normalize_angle(state_00.x[2] + stddev_02x2)])
+        state_0_ = [state_00, state_00, state_00] # update to [state_00, state_01, state_02] to test different starting points
 
         ds_Predicted = [] # add list of predicted states to this list
         labels = ["Ground truth"] # add labels with UKF ID to this list
@@ -124,12 +127,14 @@ def main():
 
             # --- PLOTTING ---
             ds_Predicted.append(UKF_State)
-            labels.append(f"UKF p:{p:.0E}, q:{q:.0E}, r:{r:.0E}, alpha:{alpha:.0E}")
+            labels.append(f"UKF P:{P[0,0]/P_0[0,0]:.0e}, Q:{Q[0,0]/Q_0[0,0]:.0e}, R:{R[0,0]/R_0[0,0]:.0e}, alpha:{alpha}")
 
         # q8
+        labels_UKF_DR = [labels[0], "UKF", "Dead reckoning"]
         DR_State = dead_reckoning(ds_GroundTruth[0], ds_Control)
-        ds_Plot([ds_GroundTruth, ds_Predicted[0], DR_State], ds_Landmark_GroundTruth, [labels[0], "UKF", "Dead reckoning"], colors)
-        plot_state_errors(ds_GroundTruth, [ds_Predicted[0], DR_State], labels, colors)
+        ds_Plot([ds_GroundTruth, ds_Predicted[0], DR_State], 
+        ds_Landmark_GroundTruth, labels_UKF_DR, colors)
+        plot_state_errors(ds_GroundTruth, [ds_Predicted[0], DR_State], labels_UKF_DR, colors)
 
         # q9
         ds_States = [ds_GroundTruth]
@@ -139,8 +144,22 @@ def main():
         plot_state_errors(ds_GroundTruth, ds_Predicted, labels, colors)
         plot_innovation(ds_Predicted, labels, colors)
 
+        # compute distance and bearing average error for ds_Predicted[0]:
+        distance_errors = []
+        bearing_errors = []
+        myUKF = ds_Predicted[0]
+        for t, state in enumerate(ds_GroundTruth):
+            distance_errors.append(np.linalg.norm(np.array(state.x[:2]) - np.array(myUKF[t].x[:2])))
+            bearing_errors.append(abs(normalize_angle(state.x[2] - myUKF[t].x[2])))
+
+        avg_distance_error = np.mean(distance_errors)
+        avg_bearing_error = math.atan2(np.mean(np.sin(bearing_errors)), np.mean(np.cos(bearing_errors)))
+
+        print(f"Average distance error: {avg_distance_error:.3f} m")
+        print(f"Average bearing error: {avg_bearing_error:.3f} rad")
 
     plt.show()
+
 
 ### DATA IMPORT ###
 
@@ -296,7 +315,7 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
     ''' Unscented Kalman Filter implementation '''
     # Prediction step
     X_np = generate_sigma_points(prior, alpha, kappa, beta) # X are the sigma points, numpy array
-    Y = [motion_model(State(x=sp), control, Q=np.zeros((3, 3))) for sp in X_np] # Y are the propagated sigma points
+    Y = [motion_model(State(x=sp), control) for sp in X_np] # Y are the propagated sigma points
     Y_np = np.array([sp.x for sp in Y]) # convert object to numpy array
     y_mean, Pyy = compute_mean_and_covariance(Y_np, Q, weights_mean, weights_cov) # same weights for mean and covariance
     
@@ -308,7 +327,7 @@ def ukf(prior: "State", control: "Control", measurements: list["Measurement"], d
             Y = [State(x=sp, P=Pyy) for sp in Y_np]
             if measurement.id in [landmark_.id for landmark_ in ds_Landmark_GroundTruth]: # if measurement id not in landmark ground truth, return prediction as posterior
                 landmark = [landmark_ for landmark_ in ds_Landmark_GroundTruth if landmark_.id == measurement.id][0] #  landmark corresponding to measurement
-                Z = [measurement_model(sp, landmark, R=np.zeros((2, 2))) for sp in Y] # Z are the estimated measurement sigma points (list of measurementobjects)
+                Z = [measurement_model(sp, landmark) for sp in Y] # Z are the estimated measurement sigma points (list of measurementobjects)
                 Z_np = np.array([m_est.z for m_est in Z]) # extract the measurement arrays from the Measurement objects
                 
                 z_mean, Pzz = compute_mean_and_covariance(Z_np, R, weights_mean, weights_cov) # same weights for mean and covariance
