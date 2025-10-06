@@ -45,7 +45,7 @@ The robot is assumed to move on a plane, with a given translational and rotation
 
 
 
-This motion model is non linear. The terms $1/\omega, \cos(\theta+\omega t), \sin(\theta+\omega t)$ make it non linear. The  condition where $\omega=0$ is linear.
+This motion model is non linear. The terms $1/\omega, \cos(\theta+\omega t), \sin(\theta+\omega t)$ make it non linear. The  special case where $\omega=0$ is linear.
 
 \section{Motion model test on example commands}
 The provided sequence of commands has separate translational and rotational speeds. The robot moves in a successions of straight lines (step 1, 3, 5). The initial state is set to $(0,0,0)$.
@@ -85,7 +85,7 @@ A number of factors can explain this behavior:
 
 \section{Unscented Kalman Filter}
 
-An unscented Kalman filter (UKF) is in concept similar to a Kalman filter, in that unfolds in two steps. The first step is the prediction: it estimates a posterior belief by means of a motion model based on prior state and a control command applied over a time step. The second step is the correction: it uses a measurement model to create an expected measurement of that posterior belief. This is then compared to the actual measurement, and the posterior belief is adjusted based on the difference between expected and actual measurement. Some knowledge of the uncertainty of both model is required for this correction step.
+An unscented Kalman filter (UKF) is in concept similar to a Kalman filter, in that unfolds in two steps. The first step is the prediction: it estimates a posterior belief by means of a motion model based on prior state and a control command applied over a time step. The second step is the correction: it uses a measurement model to create an expected measurement of that posterior belief. This is then compared to the actual measurement, and the posterior belief is adjusted based on the difference between expected and actual measurement. Some knowledge of the uncertainty of both models is required for this correction step (we will discuss further below).
 
 The UKF is different in that it is meant for non-linear models, where the state uncertainty probabilistic parametrisation (gaussian) is not conserved through the model. Instead, the uncertainty is propagated by evaluating sample points (sigma points) through the motion model. A predicted belief mean and covariance is computed from those points. This predicted belief is used to generate new sigma points which are passed through the measurement model. A predicted measurement mean and covariance are constructed.
 
@@ -99,7 +99,7 @@ Those get propagated through the measurement model:
 \[Z=h(Y_{predicted})\]
 
 The predicted measurement mean and covariance are computed from the propagated measurement sigma points.
-From the predicted belief and predicted measurement, the remaining matrix operations are performed to compute the posterior.
+From the predicted belief and predicted measurement, the remaining matrix operations are performed to compute the posterior. The Kalman gain is inversely proportional to the measurement noise covariance, so a high covariance means less correction is applied to the posterior (or larger innovations are needed to have an effect).
 \[K=P_{yz}P_{zz}^{-1}\]
 \[innovation=z_{actual}-z_{predicted}\]
 \[posterior=predicted+K*innovation\]
@@ -173,20 +173,20 @@ We will in this section perform an exploration of the different filter parameter
       \item Alpha
 \end{itemize}
 
-We have limited data available on the robot and its controls and sensors, the different covariance matrices (initial state covariance, process noise covariance and measurement noise covariance) have been assumed as diagonal matrices with no inter-dependencies.
+We have limited data available on the robot and its controls and sensors, the different covariance matrices (initial state covariance, process noise covariance and measurement noise covariance) have been assumed as diagonal matrices. All the variables in each matrix are considered to be statistically independent of one another.
 
 
 \subsection{Process and measurement noise covariance}
 With the process noise covariance matrix set to what is believed to be a reasonable value based on the motion model, we can start our exploration on the measurement noise covariance. There is limited knowledge on the sensors being used on the robot.
 An estimation of the measurement noise covariance can be estalish iteratively. We will try multiples (1, 0.01, 100) of our earlier guess $\sigma_{range}^2=10^{-2}, \sigma_{bearing}^2=10^{-2}$. The plot in \autoref{fig:figure6} shows the trajectory predictions for different noise parameters. The plots in \autoref{fig:figure7} and \autoref{fig:figure8} show the states, errors, predicted measurements and innovations for the different noise parameters. The 95\% confidence interval is shown (defined as +/-2*stddev), to get an idea of the uncertainty of the predictions.
 
-We find, as reported in \autoref{fig:figure7} and \autoref{fig:figure8}, that the measurement noise covariance has a strong impact on the behavior of the filter. The Kalman gain, which controls how much the posterior is corrected based on the innovation (difference between expected and actual measurement) is directly linked to the ratio between process noise covariance and measurement noise covariance. A higher noise covariance means more uncertainty, and less confidence in the model. The Kalman gain will be higher, and the posterior will be corrected more heavily based on the innovation (and vice versa).
+We find, as reported in \autoref{fig:figure7} and \autoref{fig:figure8}, that the measurement noise covariance has a strong impact on the behavior of the filter. The Kalman gain, which controls how much the posterior is corrected based on the innovation (difference between expected and actual measurement) is directly linked to the ratio between process noise covariance and measurement noise covariance. A higher measurement noise covariance means more uncertainty, and less confidence in the measurements. The Kalman gain will be lower, we will need a large innovation (error) to correct the state (and vice versa, a low measurement noise covariance means we can correct the state with a smaller innovation).
 
-A low measurement noise covariance leads to high overcorrection and very noisy posterior predictions. If the noise covariance is too low, the state is updated with an equivalent control*dt that shows displacement beyond what can be expected feasible.
+A low measurement noise covariance matrix leads to high overcorrection and very noisy posterior predictions. If the noise covariance is too low, the state is updated with an equivalent control*dt that shows displacement beyond what can be expected feasible.
 
-A high measurement noise covariance leads to oversmoothing of the trajectory, the correction step provides minimal adjustments which leads to delayed corrections (the error needs to be large for the correction to take effect). For very large (order of magnitude larger of 5 or more then the process noise covariance), the model will ignore the measurements and the robot be left dead reckoning.
+A high measurement noise covariance matrix leads to oversmoothing of the trajectory, the correction step provides minimal adjustments which leads to delayed corrections (the error needs to be large for the correction to take effect). For very large (order of magnitude larger of 5 or more then the process noise covariance), the model will ignore the measurements and the robot be left dead reckoning.
 
-It seems that a difference in order of magnitude of 4 leads to appreciable results, which is actually consistent with the initial guess. This leads to the smoothest (not over-corrected) and most accurate trajectory. Additionally, one can observe that shifting both process and measurement noise covariance higher or lower in pairs has little impact on the trajectory (the Kalman gain remains effectively unchanged).
+It seems that a difference in order of magnitude of 4 leads to our best results, which is actually consistent with the initial guess. This leads to the smoothest (not over-corrected) and most accurate trajectory. Additionally, one can observe that shifting both process and measurement noise covariance higher or lower in pairs has little impact on the trajectory.
 
 \begin{figure}
 \centering
@@ -211,7 +211,7 @@ It seems that a difference in order of magnitude of 4 leads to appreciable resul
 \end{figure}
 
 \subsection{Initial state and its covariance}
-Adding noise to the starting point and/or increasing the initial state covariance seems to have limited impact. For a known starting point, the initial state covariance has little impact. Once the first measurements are available, the filter quickly converges back near the true state and all estimations become in agreement with one another.
+Adding noise to the starting point and/or increasing the initial state covariance seems to have limited impact. For a known starting point, the initial state covariance has little impact. Once the first measurements are available, the filter quickly converges back near the true state and all estimations agree with one another.
 
 \subsection{Alpha}
 Alpha controls the spread to the mean when creating the sigma points. After iteratiing for $\alpha=[0.01, 0.1, 1]$, it does not seem to have much of an impact on the behavior of the filter. This gives confidence in the capacity of the sigma points in capturing the non-linear behavior and the assumption about the state estimation as a gaussian (we have a single target / we do not expect a multi modal distribution).
