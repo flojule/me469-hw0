@@ -6,80 +6,199 @@
 
 % Set page size and margins
 % Replace `letterpaper' with `a4paper' for UK/EU standard size
-\usepackage[letterpaper,top=2cm,bottom=2cm,left=3cm,right=3cm,marginparwidth=1.75cm]{geometry}
+\usepackage[letterpaper,top=2cm,bottom=2cm,left=2cm,right=2cm,marginparwidth=1.75cm]{geometry}
 
 % Useful packages
 \usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage[colorlinks=true, allcolors=blue]{hyperref}
 
-\title{Your Paper}
-\author{You}
+\graphicspath{ {figures/} }
+
+\title{ME469-HW0-UKF-ds0}
+\author{Florian Jule}
 
 \begin{document}
 \maketitle
 
-\begin{abstract}
-Your abstract.
-\end{abstract}
+\section{Part A}
+\subsection{Motion model}
+The motion model needs a starting position: $(x_0, y_0, \theta_0)$. 
+Its inputs are: the prior position and orientation: $(x_{t-1}, y_{t-1}, \theta_{t-1})$, the controls input at time $t$, translational and rotational speeds, $(\nu,\omega)$. 
+Its outputs are: posterior estimations of the positions and orientation $(x, y, \theta)$.
 
-\section{Introduction}
+Motion model math:
+% add plot
 
-Your introduction goes here! Simply start writing your document and use the Recompile button to view the updated PDF preview. Examples of commonly used commands and features are listed below, to help you get started.
+Depending on the type of filter used, noise might need to be introduced at this step which requires to define the process noise covariance. With the UKF, the sigma points will play this role, we do not need to introduce additional noise at this stage.
 
-Once you're familiar with the editor, you can find various project settings in the Overleaf menu, accessed via the button in the very top left of the editor. To view tutorials, user guides, and further documentation, please visit our \href{https://www.overleaf.com/learn}{help library}, or head to our plans page to \href{https://www.overleaf.com/user/subscription/plans}{choose your plan}.
 
-\section{Some examples to get started}
+The model is non linear. The terms $1/\omega, \cos(\theta+\omega t), \sin(\theta+\omega t)$ make it non linear. The  condition where $\omega=0$ is linear.
+We will this model simple and not try to factor assumptions about the robot and the possible wheel slip
+% reference research on wheel slip motion model and assumptions / parameters.
+A shortcoming of this model comes from its discrete nature and the lack of knowledge about the control system, power units and drivetrain. We assume the speed to be a step function whereas it should be continuous (no infinite acceleration).
 
-\subsection{How to create Sections and Subsections}
+\subsection{Motion model test on example commands}
+The provided sequence of commands has separate translational and rotational speeds. The robot moves in a successions of straight lines (step 1, 3, 5).
+Parameters:
+The behavior is as expected.
 
-Simply use the section and subsection commands, as in this example document! With Overleaf, all the formatting and numbering is handled automatically according to the template you've chosen. If you're using the Visual Editor, you can also create new section and subsections via the buttons in the editor toolbar.
-
-\subsection{How to include Figures}
-
-First you have to upload the image file from your computer using the upload link in the file-tree menu. Then use the includegraphics command to include it in your document. Use the figure environment and the caption command to add a number and a caption to your figure. See the code for Figure \ref{fig:frog} in this section for an example.
-
-Note that your figure will automatically be placed in the most appropriate place for it, given the surrounding text and taking into account other figures or tables that may be close by. You can find out more about adding images to your documents in this help article on \href{https://www.overleaf.com/learn/how-to/Including_images_on_Overleaf}{including images on Overleaf}.
-
-% \begin{figure}
-% \centering
-% \includegraphics[width=0.25\linewidth]{frog.jpg}
-% \caption{\label{fig:frog}This frog was uploaded via the file-tree menu.}
-% \end{figure}
-
-\subsection{How to add Tables}
-
-Use the table and tabular environments for basic tables --- see Table~\ref{tab:widgets}, for example. For more information, please see this help article on \href{https://www.overleaf.com/learn/latex/tables}{tables}.
-
-\begin{table}
+\begin{figure}
 \centering
-\begin{tabular}{l|r}
-Item & Quantity \\\hline
-Widgets & 42 \\
-Gadgets & 13
-\end{tabular}
-\caption{\label{tab:widgets}An example table.}
-\end{table}
+\includegraphics[width=\textwidth]{Figure_1.png}
+\caption{Robot motion model test on example commands}
+\end{figure}
 
-\subsection{How to add Comments and Track Changes}
+\subsection{Motion model test on robot dataset}
+The starting point of the dead-reckoned path uses the ground truth for its initial state. We can observe a growing drift that is only additive. The trajectory loosely tracks for a couple turns until it completely diverges.
+% find where divergence starts and why
+% show error plot
 
-Comments can be added to your project by highlighting some text and clicking ``Add comment'' in the top right of the editor pane. To view existing comments, click on the Review menu in the toolbar above. To reply to a comment, click on the Reply button in the lower right corner of the comment. You can close the Review pane by clicking its name on the toolbar when you're done reviewing for the time being.
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{Figure_2.png}
+\caption{Robot dead reckoning, compared to ground truth}
+\end{figure}
 
-Track changes are available on all our \href{https://www.overleaf.com/user/subscription/plans}{premium plans}, and can be toggled on or off using the option at the top of the Review pane. Track changes allow you to keep track of every change made to the document, along with the person making the change.
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{Figure_3.png}
+\caption{Robot position and error}
+\end{figure}
 
-\subsection{How to add Lists}
+\subsection{Unscented Kalman Filter}
 
-You can make lists with automatic numbering \dots
+An unscented Kalman filter (UKF) is fundamentally identical to a Kalman filter, in that unfolds in two steps. The first step is the prediction: it estimates a posterior belief by means of a motion model based on prior state and a control command applied over a time step. The second step is the correction: it uses a measurement model to create an expected measurement of that posterior belief. This is then compared to the actual measurement, and the posterior belief is adjusted based on the difference between expected and actual measurement. Some knowledge of the uncertainty of both model is required for this correction step.
 
-\begin{enumerate}
-\item Like this,
-\item and like this.
-\end{enumerate}
-\dots or bullet points \dots
-\begin{itemize}
-\item Like this,
-\item and like this.
-\end{itemize}
+The UKF is different in that it is meant for non-linear models, where the state uncertainty probabilistic parametrisation (gaussian) is not conserved through the model. Instead, the uncertainty is propagated by evaluating sample points (sigma points) through the motion model, and a mean belief and associated covariance is recreated from those points. New sigma points are generated to pass through the measurement model and a mean measurement and associated covariance are constructed. 
+% add sigma point math
+The remaining algebraic operations are performed on those means (posterior belief and measurement belief).
+% Add matric math here
+
+
+\subsection{Measurement model}
+
+The measurement model takes the predicted belief $(x, y, \theta)$ as input as well as knowledge about the space, in this case the measured (assumed true) positions of the landmarks (those are available via the Landmark Groundtruth file).
+The model outputs an estimated measurement range and bearing.
+
+The derivation of the measurement model is as follows:
+% add math equations and drawing
+
+The measurement data reads landmark barcodes. Those need to be converted to the subject number between 6 and 20 so that they can be paired with the ground truth landmark data. This is done using the barcodes file.
+
+
+\subsection{Test of measurement model on robot data}
+The measurement model contains no noise and the positions provided are assumed to be the known robot position. The measurement model successfully finds all landmarks with zero error.
+
+
+\section{Part B}
+\subsection{Filter implementation}
+
+In order for the filter to be implemented on this dataset, some attention needs to be paid to synchronize the data. The controls and the measurements are on different time grids. We interpolate the controls data over a fixed timestep chosen to be 0.05. This timestep can be updated but seems to have little effects on the overall behavior. The measurements are grounped to the nearest timestep. Because of the lower accuracy of those measurement, this will prove acceptable.
+
+Special attention also needs to be paid when working with angle. Anytime an angle is manipulated, we will normalize it between $]-\pi,\pi]$ and we will use the circular mean to compute means.
+% add ref to wiki
+
+
+\subsection{Comparison to dead reckoning}
+The commands from step 2 lead to similar results for both model, if the process noise covariance has a high impact on the motion model.
+Let us looks at the data and try to undestand the order of magnitude of the covariance matrices.
+Looking at the control data set (resampled at 0.05s intervals), the we find $\nu<0.1m/s$ and $\omega<0.6rad/s$. This means the order of magnitude of the state will evolve after a timestep is ($0.005m$ and $0.03rad$). If the standard deviation is of that magnitude, (covariance $\sigma_x=\sigma_y=0.00025,\sigma_\theta=0.001$), we can expect significan noise and non realistic posterior updates. 
+We don't expect the motion model to be an order of magnitude off, it is reasonable to set the process noise covariance matrix an order of magnitude below.
+We have no data on the measurements accuracy or the robot sensor.
+
+% review values for example
+We will assume moving forward that the process noise covariance is set to appropriate values as explained above (and more will be discussed below when reviewing parameter tuning).
+Now looking at the robot dataset, we can find that the first measurement is collected at $t=11.100s$. Until then, both model match (prediction step only, no correction).
+% observations prior to DR diverging
+% drift triggered by event
+
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{Figure_4.png}
+\caption{Robot trajectory predictions with and without UKF}
+\end{figure}
+
+
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{Figure_5.png}
+\caption{Robot states and errors}
+\end{figure}
+
+\subsection{Filter analysis}
+We will in this section perform an exploration of the different filter parameters.
+The following assumptions have been made for simplicity:
+- x and y have the same covariances. 
+- $\theta$ covariance
+- range and bearing
+- the covariance matrices is diagonal, i.e. independence of the different state/measurement variables. 
+- the initial state and its covariance, we use the ground truth to set the robot position. A very small initial state covariance makes sense. We will later look at this assumption and whether offseting the starting position impacts the model.
+
+We have limited data available on the robot and its controls and sensors, the different covariance matrices (initial state covariance, process noise covariance and measurement noise covariance) have been assumed as diagonal elements of equal variances. An exploration in search of finding optimal parameters and understanding plausible assumptions is shown below. 
+% review noise assumptions
+
+
+\subsubsection{Process and measurement noise covariance}
+Setting the process and measurement noise covariance is an iterative process. There is limited knowledge on the sensors being used on the robot. The motion model seems reasonable for short timesteps, especially if no differencial is applied from the controls (motion in straight line). We can get an idea of the standard deviation by looking at the dead reckoning model and estimating the drift over time.
+% add plot drift between t=0-20
+A starting point of $q=1e-6$ seems reasonable.
+An estimation of the measurement noise covariance can be estalish iteratively. We will try $r=[1e-2, 1e-4, 1e-6, 1e-8]$.
+The difference between the noise covariance matrices has a strong impact on the result. A smaller process noise covariance compared to the measurement one means that the posterior is more heavily influenced by the prediction step than the correction step (small Kalman gain * innovation). And vice versa.
+
+A measurement noise covariance of 5 or more order of magnitude higher than the process noise covariance essentially leads the model to ignore the measurements and leaves the robot dead reckoning.
+% plot dead reckoning and high r
+
+A measurement noise covariance of the same magnitude as the process noise covariance leads to high overcorrection and very noisy posterior predictions: the position never stabilizes and drifts away from the ground truth. The state is updated with an equivalent control*dt that shows displacement beyond what can be expected reasonable (>10x expected motion).
+% plot low r, show dt*control equivalent
+
+It seems that a difference in order of magnitude of 4 leads to appreciable results. One can observe that shifting both the noise covariance higher or lower in pairs has little impact on the trajectory.
+% plot shifting both in pairs
+
+Plotting for process noise and measurement noise matched in pairs and offset by 4 orders of magnitude, one gets close to identical results (error within e-4 meters or 0.1mm). 4 OeM seems to lead to the smoothest trajectory (not over correcting) while minimizing error.
+
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{Figure_6.png}
+\caption{Robot trajectory predictions for different UKF noise parameters. The 95 percent confidence interval on position is shown on the right figure.}
+\end{figure}
+
+
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{Figure_7.png}
+\caption{Robot states and errors for different UKF noise parameters}
+\end{figure}
+
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{Figure_8.png}
+\caption{Robot predicted measurements and innovations for different UKF noise parameters}
+\end{figure}
+
+\subsubsection{Initial state and its covariance}
+For a known starting point, the initial state covariance has little to no impact.An initial covariance set fairly high (1e-1) will generate noise, this will however not last and the model corrects this behavior after a few seconds and all estimations become in agreement with one another.
+% show plot with different initial cov
+% move initial point and check impact on model
+
+\subsubsection{Alpha}
+Alpha controls the spread to the mean when creating the sigma points. After iteratiing for $\alpha=[0.01, 0.1, 1]$, it does not seem to have much of an impact on the behavior of the filter. This gives confidence in the capacity of the sigma points in capturing the non-linear behavior and the assumption about the state estimation as a gaussian.
+
+\subsubsection{Missed measurement}
+% find in data longest range with no measurement
+
+\subsubsection{Multiple measurements}
+% find litterature that suggest sequential correction (instead of weighted average)
+If several measurements are found for a given time step, the correction step loops over the measurements one by one, using the corrected posterior as the new input for the next measurement.
+
+\subsubsection{Final considerations}
+A reminder in probability: the 95% confidence interval is given by +/-2*stddev, and the 99% confidence interface is given by +/-3*stddev.
+The following parameters are eventually chosen:
+$p=1e-6$ initial position.
+$q=1e-6 (stddev=\sqrt(q)=0.001m or 1mm / 0.001rad or 0.06degrees)$ is a reasonable error assumption for a command over small dt (0.05s). 
+$r=1e-2 (stddev=sqrt(r)=0.1m or 100mm / 0.1rad or 6degress)$ is a large but plausible error for the measurements.
+$\alpha=0.1$ Alpha has been found to have little impact on this model and dataset. 
+
 
 \subsection{How to write Mathematics}
 
@@ -89,31 +208,7 @@ You can make lists with automatic numbering \dots
 denote their mean. Then as $n$ approaches infinity, the random variables $\sqrt{n}(S_n - \mu)$ converge in distribution to a normal $\mathcal{N}(0, \sigma^2)$.
 
 
-\subsection{How to change the margins and paper size}
-
-Usually the template you're using will have the page margins and paper size set correctly for that use-case. For example, if you're using a journal article template provided by the journal publisher, that template will be formatted according to their requirements. In these cases, it's best not to alter the margins directly.
-
-If however you're using a more general template, such as this one, and would like to alter the margins, a common way to do so is via the geometry package. You can find the geometry package loaded in the preamble at the top of this example file, and if you'd like to learn more about how to adjust the settings, please visit this help article on \href{https://www.overleaf.com/learn/latex/page_size_and_margins}{page size and margins}.
-
-\subsection{How to change the document language and spell check settings}
-
-Overleaf supports many different languages, including multiple different languages within one document.
-
-To configure the document language, simply edit the option provided to the babel package in the preamble at the top of this example project. To learn more about the different options, please visit this help article on \href{https://www.overleaf.com/learn/latex/International_language_support}{international language support}.
-
-To change the spell check language, simply open the Overleaf menu at the top left of the editor window, scroll down to the spell check setting, and adjust accordingly.
-
-\subsection{How to add Citations and a References List}
-
-You can simply upload a \verb|.bib| file containing your BibTeX entries, created with a tool such as JabRef. You can then cite entries from it, like this: \cite{greenwade93}. Just remember to specify a bibliography style, as well as the filename of the \verb|.bib|. You can find a \href{https://www.overleaf.com/help/97-how-to-include-a-bibliography-using-bibtex}{video tutorial here} to learn more about BibTeX.
-
-If you have an \href{https://www.overleaf.com/user/subscription/plans}{upgraded account}, you can also import your Mendeley or Zotero library directly as a \verb|.bib| file, via the upload menu in the file-tree.
-
-\subsection{Good luck!}
-
-We hope you find Overleaf useful, and do take a look at our \href{https://www.overleaf.com/learn}{help library} for more tutorials and user guides! Please also let us know if you have any feedback using the \textbf{Contact us} link at the bottom of the Overleaf menu --- or use the contact form at \url{https://www.overleaf.com/contact}.
-
-\bibliographystyle{alpha}
+% \bibliographystyle{alpha}
 % \bibliography{sample}
 
 \end{document}
